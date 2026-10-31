@@ -55,3 +55,13 @@ Admin Dashboard should provide server status/capacity, transfer enable/disable, 
 
 ## Rollout
 Start with same-region transfers only. Test with staging servers, simulated failures, duplicate requests and full destinations before enabling in production. Keep the ticket price and cooldown configurable rather than hardcoding them.
+
+## One-way transfer direction (newer server to older server only)
+
+- Assign every game server an immutable chronological sequence number when it is opened. A lower-priority/older destination is a server with a **higher sequence number** than the player's current home server.
+- Transfers are allowed only in the downward direction: from a newer server to an older server. A player may choose any eligible older server, subject to region, capacity and the other eligibility rules.
+- Transfers to a newer server are forbidden. In particular, an older server must never transfer characters into a server opened later.
+- Example: if Server 1 is the newest and Server 4 is the oldest, a player on Server 1 may transfer to Server 2, 3 or 4; a player on Server 3 may transfer only to Server 4; a player on Server 4 has no eligible older destination.
+- Newly opened servers are transfer destinations only for players on servers newer than them? **No**: because they are newer, they are not eligible destinations for any existing older server. New servers start as fresh progression environments.
+- The server list must display each server's opening order/status and clearly label eligible older destinations. The backend must enforce direction using server sequence metadata, not client-supplied labels or sorting.
+- Admins may not override the one-way direction through ordinary transfer controls. Any exceptional data migration for operational recovery must use a separate, audited administrative process and must not be presented as a player-initiated server transfer.
