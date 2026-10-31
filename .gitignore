@@ -1,0 +1,36 @@
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svclog
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.DS_Store
+
+# .NET
+**/bin/
+**/obj/
+
+# PHP / secrets
+.env
+.env.*
+!.env.example
+/vendor/
+.phpunit.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
