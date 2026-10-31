@@ -24,7 +24,7 @@ A game account is bound to its selected home server. Players cannot freely switc
 5. No pending marketplace listings, trades, mail claims, store deliveries or unsettled purchases.
 6. Guild membership/leadership and guild applications must be resolved before transfer; guild membership does not automatically migrate in the first version.
 7. No active account restriction, fraud review or transfer lock.
-8. Apply an initial cooldown of 30 days after a successful transfer. This is a proposed starting value and should be configurable by admins.
+8. A player's transfer eligibility is not restricted by a personal 30-day cooldown in this policy. The 30-day cooldown applies to newly released destination servers, as defined below.
 
 ## Data migration policy
 Transfer the player's game profile and eligible progression as one controlled operation:
@@ -56,12 +56,17 @@ Admin Dashboard should provide server status/capacity, transfer enable/disable, 
 ## Rollout
 Start with same-region transfers only. Test with staging servers, simulated failures, duplicate requests and full destinations before enabling in production. Keep the ticket price and cooldown configurable rather than hardcoding them.
 
-## One-way transfer direction (newer server to older server only)
+## New server release cooldown
 
-- Assign every game server an immutable chronological sequence number when it is opened. A lower-priority/older destination is a server with a **higher sequence number** than the player's current home server.
-- Transfers are allowed only in the downward direction: from a newer server to an older server. A player may choose any eligible older server, subject to region, capacity and the other eligibility rules.
-- Transfers to a newer server are forbidden. In particular, an older server must never transfer characters into a server opened later.
-- Example: if Server 1 is the newest and Server 4 is the oldest, a player on Server 1 may transfer to Server 2, 3 or 4; a player on Server 3 may transfer only to Server 4; a player on Server 4 has no eligible older destination.
-- Newly opened servers are transfer destinations only for players on servers newer than them? **No**: because they are newer, they are not eligible destinations for any existing older server. New servers start as fresh progression environments.
-- The server list must display each server's opening order/status and clearly label eligible older destinations. The backend must enforce direction using server sequence metadata, not client-supplied labels or sorting.
-- Admins may not override the one-way direction through ordinary transfer controls. Any exceptional data migration for operational recovery must use a separate, audited administrative process and must not be presented as a player-initiated server transfer.
+- Every newly launched server has a configurable **incoming transfer lock period**, initially 30 days from its official release timestamp.
+- During this period, players may create fresh characters/accounts on that server if the server is open for new players, but characters/accounts transferred from other servers cannot enter it.
+- When the 30-day release cooldown expires, the server becomes an eligible destination for incoming transfers, provided it is online, accepting transfers, has capacity and meets the other transfer rules.
+- The cooldown is destination-specific. It does not impose a 30-day waiting period on a player after they transfer to another already-eligible server.
+- Calculate eligibility from the server's exact release timestamp plus the configured duration (for example, release at 1 November 00:00 + 30 days = 1 December 00:00). Show the exact unlock date and time in the server list, using the server's region time zone.
+- Admins can configure the duration and release timestamp before launch. Changes after launch must be audited and must not silently shorten an active lock.
+- The backend must enforce the lock using server metadata and server time; the client countdown is informational only.
+
+## Transfer destination policy
+
+- Once a destination server's release cooldown has expired, transfers may be made to any eligible server, whether it is older or newer than the player's current server.
+- There is no one-way newer-to-older restriction. Destination availability is determined by release cooldown, region policy, capacity and normal eligibility checks.
