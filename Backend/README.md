@@ -14,7 +14,7 @@ Initial backend foundation for shared StudyGo accounts and MMORPG authentication
    - `database/schema.sql` (creates `game_players`)
    - `database/migrations/000_studygo_auth.sql` (creates StudyGo accounts and server membership)
    - `database/migrations/006_studygo_education.sql`
-   - `database/migrations/007_auth_security.sql` (login throttling and token metadata)
+   - `database/migrations/007_auth_security.sql` (login throttling and token metadata)\n   - `database/migrations/008_admob_admin.sql` (AdMob settings, admin roles, SSV event ledger)
    - Remaining game migrations in numeric order.
 3. Copy `config/config.example.php` to `config/config.php`; set DB and JWT secrets through server environment variables. Do not commit `config.php`.
 4. Point the web document root to `Backend/public`. If cPanel cannot set a document root, use a public front-controller directory and keep config/src/database outside public_html.
@@ -41,12 +41,12 @@ All endpoints below except the internal reward callback require `Authorization: 
 - `PATCH|DELETE /api/v1/notes/{id}`
 - `GET /api/v1/ai/quota`
 - `POST /api/v1/ai/tutor` JSON: `question,requestId` (UUID)
-- `POST /internal/ads/reward-callback` is server-to-server only; requires `X-StudyGo-Signature` HMAC-SHA256 and `AD_REWARD_CALLBACK_SECRET`.
+- `POST /internal/ads/reward-callback` is an internal server-to-server HMAC adapter; it is not Google AdMob verification.\n- `GET /internal/ads/admob-ssv` verifies Google's ECDSA/SHA-256 signature using the public key selected by `key_id`.\n- `GET|PUT /api/v1/admin/ads` manages AdMob App IDs, Banner/Rewarded/Interstitial unit IDs, reward settings, and SSV enablement for admin accounts.
 
-AI quota: 5 questions/day + 3 per verified reward callback, maximum 3 rewarded ads/day (14 questions total). Daily reset uses Asia/Jakarta. AI provider keys remain server-side. The reward callback is a signed internal adapter; production AdMob SSV signature verification must be implemented at the callback adapter before accepting Google callbacks.
+AI quota: 5 questions/day + 3 per verified reward callback, maximum 3 rewarded ads/day (14 questions total). Daily reset uses Asia/Jakarta. AI provider keys remain server-side. The reward callback is a signed internal adapter; Google AdMob SSV must be enabled only after migration 008, admin configuration, and the callback URL are in place.
 
 ## Important limitations before production
-- Add global/IP rate limiting beyond login throttling, email verification, password reset, session listing/revocation UI, and abuse monitoring. Refresh-token rotation and logout endpoints are implemented, but need integration tests.
+- Add global/IP rate limiting beyond login throttling, email verification, password reset, session listing/revocation UI, and abuse monitoring. Admin AdMob settings UI is at `admin/ads.html` and requires an admin bearer token; seed the first owner in `studygo_admin_users` as documented in `Documentation/ADMOB_SSV_ADMIN_SETUP.md`. Refresh-token rotation and logout endpoints are implemented, but need integration tests.
 - Configure CORS with exact app/web origins. Native Flutter clients do not need permissive wildcard CORS.
 - Add server onboarding/membership workflow and admin tools.
 - Implement remaining education modules: materials and secure uploads, image-question recognition, reminders/notifications, verified AdMob SSV adapter, and admin dashboard.
