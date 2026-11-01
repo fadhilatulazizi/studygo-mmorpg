@@ -96,8 +96,8 @@ final class ApiKernel
         $this->pdo->prepare("UPDATE studygo_users SET last_login_at=UTC_TIMESTAMP() WHERE id=?")->execute([$user['id']]);
         $access=$this->randomToken(32);$refresh=$this->randomToken(48);
         $days=max(1,min(90,(int)($this->config['auth']['refresh_ttl_days']??30)));
-        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,expires_at) VALUES(?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))")->execute([$user['id'],hash('sha256',$access)]);
-        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,expires_at) VALUES(?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))")->execute([$user['id'],hash('sha256',$refresh)]);
+        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,expires_at) VALUES(?,?,'access',DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))")->execute([$user['id'],hash('sha256',$access)]);
+        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,expires_at) VALUES(?,?,'refresh',DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))")->execute([$user['id'],hash('sha256',$refresh)]);
         $this->respond(200,['user'=>['id'=>(int)$user['id'],'email'=>$user['email'],'displayName'=>$user['display_name']],'accessToken'=>$access,'tokenType'=>'Bearer','expiresIn'=>900,'refreshToken'=>$refresh]);
     }
 
@@ -105,7 +105,7 @@ final class ApiKernel
     {
         $header=$_SERVER['HTTP_AUTHORIZATION']??'';
         if(!preg_match('/^Bearer\s+([A-Za-z0-9_-]{40,100})$/i',$header,$m)){$this->respond(401,['error'=>'unauthorized']);exit;}
-        $q=$this->pdo->prepare("SELECT u.id,u.email,u.display_name FROM studygo_refresh_tokens t JOIN studygo_users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>UTC_TIMESTAMP() AND u.account_status='active' LIMIT 1");
+        $q=$this->pdo->prepare("SELECT u.id,u.email,u.display_name FROM studygo_refresh_tokens t JOIN studygo_users u ON u.id=t.user_id WHERE t.token_hash=? AND t.token_type='access' AND t.revoked_at IS NULL AND t.expires_at>UTC_TIMESTAMP() AND u.account_status='active' LIMIT 1");
         $q->execute([hash('sha256',$m[1])]);$u=$q->fetch();
         if(!$u){$this->respond(401,['error'=>'invalid_or_expired_token']);exit;}return $u;
     }
