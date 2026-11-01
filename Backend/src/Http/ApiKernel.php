@@ -39,6 +39,10 @@ final class ApiKernel
             if ($method === 'POST' && $path === '/api/v1/auth/login') { $this->login($body); return; }
             if ($method === 'POST' && $path === '/api/v1/auth/refresh') { $this->refresh($body); return; }
             if ($method === 'POST' && $path === '/api/v1/auth/logout') { $this->logout($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/password/forgot') { $this->forgotPassword($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/password/reset') { $this->resetPassword($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/email/resend') { $this->resendVerification($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/email/verify') { $this->verifyEmail($body); return; }
             if ($method === 'GET' && $path === '/api/v1/auth/me') {
                 $u=$this->authenticatedUser();
                 $this->respond(200,['user'=>['id'=>(int)$u['id'],'email'=>$u['email'],'displayName'=>$u['display_name']]]);
@@ -55,6 +59,8 @@ final class ApiKernel
             }
 
             $user=$this->authenticatedUser();
+            if ($method === 'GET' && $path === '/api/v1/auth/sessions') { $this->listSessions((int)$user['id']); return; }
+            if (preg_match('#^/api/v1/auth/sessions/([0-9a-fA-F-]{36})$#',$path,$sm) && $method === 'DELETE') { $this->revokeSession((int)$user['id'],$sm[1]); return; }
             $education=new EducationApi($this->pdo,$this->config);
             $result=$education->handle($method,$path,$body,(int)$user['id']);
             if($result!==null){$this->respond($result['status'],$result['data']);return;}
@@ -264,6 +270,63 @@ final class ApiKernel
         $result['ssvEnabled']=($result['ssvEnabled']==='1');
         $result['rewardAmount']=(int)($result['rewardAmount']?:3);
         $this->respond(200,['ads'=>$result]);
+    }
+
+    private function randomUuid(): string
+    {
+        $b=random_bytes(16);$b[6]=chr((ord($b[6])&15)|64);$b[8]=chr((ord($b[8])&63)|128);
+        $h=bin2hex($b);return substr($h,0,8).'-'.substr($h,8,4).'-'.substr($h,12,4).'-'.substr($h,16,4).'-'.substr($h,20);
+    }
+    private function sendAccountToken(int $id,string $email,string $purpose): bool
+    {
+        $raw=$this->randomToken(32);
+        $this->pdo->prepare("INSERT INTO studygo_email_tokens(user_id,token_hash,purpose,expires_at) VALUES(?,?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY))")->execute([$id,hash('sha256',$raw),$purpose]);
+        $base=rtrim((string)($this->config['mail']['action_url']??''),'/');if($base==='')return false;
+        $url=$base.($purpose==='verify_email'?'/verify-email?token=':'/reset-password?token=').rawurlencode($raw);
+        $subject=$purpose==='verify_email'?'Verifikasi email StudyGo':'Reset password StudyGo';
+        $html='<p>Gunakan tautan berikut: <a href="'.htmlspecialchars($url,ENT_QUOTES,'UTF-8').'">Lanjutkan</a></p><p>Tautan berlaku 24 jam.</p>';
+        return (new \StudyGo\Security\Mailer($this->config))->send($email,$subject,$html);
+    }
+    private function forgotPassword(array $b): void
+    {
+        $email=strtolower(trim((string)($b['email']??'')));
+        if(filter_var($email,FILTER_VALIDATE_EMAIL)){$q=$this->pdo->prepare("SELECT id,email FROM studygo_users WHERE email=? AND account_status='active' LIMIT 1");$q->execute([$email]);$u=$q->fetch();if($u)$this->sendAccountToken((int)$u['id'],$u['email'],'password_reset');}
+        $this->respond(200,['message'=>'if_account_exists_reset_email_sent']);
+    }
+    private function resetPassword(array $b): void
+    {
+        $token=(string)($b['token']??'');$password=(string)($b['password']??'');
+        if(!preg_match('/^[A-Za-z0-9_-]{40,100}$/',$token)||strlen($password)<10||strlen($password)>200)throw new \InvalidArgumentException('invalid_reset_request');
+        $this->pdo->beginTransaction();
+        try{$q=$this->pdo->prepare("SELECT id,user_id FROM studygo_email_tokens WHERE token_hash=? AND purpose='password_reset' AND consumed_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE");$q->execute([hash('sha256',$token)]);$r=$q->fetch();if(!$r)throw new \InvalidArgumentException('invalid_or_expired_reset_token');
+            $this->pdo->prepare("UPDATE studygo_email_tokens SET consumed_at=UTC_TIMESTAMP() WHERE id=?")->execute([$r['id']]);
+            $this->pdo->prepare("UPDATE studygo_users SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$r['user_id']]);
+            $this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE user_id=? AND revoked_at IS NULL")->execute([$r['user_id']]);$this->pdo->commit();
+        }catch(\Throwable $e){if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        $this->respond(200,['passwordReset'=>true,'sessionsRevoked'=>true]);
+    }
+    private function resendVerification(array $b): void
+    {
+        $email=strtolower(trim((string)($b['email']??'')));
+        if(filter_var($email,FILTER_VALIDATE_EMAIL)){$q=$this->pdo->prepare("SELECT id,email,email_verified_at FROM studygo_users WHERE email=? LIMIT 1");$q->execute([$email]);$u=$q->fetch();if($u&&$u['email_verified_at']===null)$this->sendAccountToken((int)$u['id'],$u['email'],'verify_email');}
+        $this->respond(200,['message'=>'if_verification_needed_email_sent']);
+    }
+    private function verifyEmail(array $b): void
+    {
+        $token=(string)($b['token']??'');if(!preg_match('/^[A-Za-z0-9_-]{40,100}$/',$token))throw new \InvalidArgumentException('invalid_verification_token');
+        $this->pdo->beginTransaction();
+        try{$q=$this->pdo->prepare("SELECT id,user_id FROM studygo_email_tokens WHERE token_hash=? AND purpose='verify_email' AND consumed_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE");$q->execute([hash('sha256',$token)]);$r=$q->fetch();if(!$r)throw new \InvalidArgumentException('invalid_or_expired_verification_token');
+            $this->pdo->prepare("UPDATE studygo_email_tokens SET consumed_at=UTC_TIMESTAMP() WHERE id=?")->execute([$r['id']]);$this->pdo->prepare("UPDATE studygo_users SET email_verified_at=UTC_TIMESTAMP() WHERE id=?")->execute([$r['user_id']]);$this->pdo->commit();
+        }catch(\Throwable $e){if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        $this->respond(200,['emailVerified'=>true]);
+    }
+    private function listSessions(int $userId): void
+    {
+        $q=$this->pdo->prepare("SELECT session_id,MAX(device_label) device_label,MAX(created_at) created_at,MAX(last_used_at) last_used_at,MAX(expires_at) expires_at FROM studygo_refresh_tokens WHERE user_id=? GROUP BY session_id HAVING SUM(token_type='refresh' AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP())>0 ORDER BY created_at DESC");$q->execute([$userId]);$this->respond(200,['sessions'=>$q->fetchAll()]);
+    }
+    private function revokeSession(int $userId,string $sessionId): void
+    {
+        $q=$this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE user_id=? AND session_id=? AND revoked_at IS NULL");$q->execute([$userId,$sessionId]);$this->respond(200,['revoked'=>true]);
     }
 
     private function jsonBody(): array
