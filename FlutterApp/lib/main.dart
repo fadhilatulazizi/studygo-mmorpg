@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'api/studygo_api.dart';
 
-const apiBaseUrl = String.fromEnvironment('STUDYGO_API_URL', defaultValue: 'https://api.example.com');
+const apiBaseUrl = String.fromEnvironment('STUDYGO_API_URL', defaultValue: 'https://api.studygo.turaja.id');
 void main() => runApp(const StudyGoApp());
 
 class StudyGoApp extends StatelessWidget {
@@ -40,20 +40,32 @@ class LoginPage extends StatefulWidget {
   @override State<LoginPage> createState()=>_LoginPageState();
 }
 class _LoginPageState extends State<LoginPage> {
-  final email=TextEditingController(),password=TextEditingController();
-  bool busy=false;String error='';
+  final name=TextEditingController(),email=TextEditingController(),password=TextEditingController();
+  bool busy=false,registerMode=false;String error='';
   Future<void> login() async {
     setState((){busy=true;error='';});
     try{await widget.api.login(email.text.trim(),password.text);widget.onLogin();}
-    catch(e){setState(()=>error=e.toString());}
+    catch(e){if(mounted)setState(()=>error=e.toString());}
     finally{if(mounted)setState(()=>busy=false);}
+  }
+  Future<void> register() async {
+    setState((){busy=true;error='';});
+    try {
+      await widget.api.register(name.text.trim(),email.text.trim(),password.text);
+      if(!mounted)return;
+      setState(()=>registerMode=false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Akun berhasil dibuat. Silakan masuk dengan email dan password Anda.')));
+    } catch(e) { if(mounted)setState(()=>error=e.toString()); }
+    finally { if(mounted)setState(()=>busy=false); }
   }
   @override Widget build(BuildContext context)=>Scaffold(body:Center(child:SingleChildScrollView(padding:const EdgeInsets.all(24),child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:420),child:Column(mainAxisSize:MainAxisSize.min,children:[
     const Icon(Icons.school,size:64,color:Color(0xff0d9488)),const SizedBox(height:12),Text('StudyGo',style:Theme.of(context).textTheme.headlineLarge),const SizedBox(height:24),
+    if(registerMode) ...[TextField(controller:name, textCapitalization:TextCapitalization.words, decoration:const InputDecoration(labelText:'Nama lengkap',border:OutlineInputBorder())),const SizedBox(height:12)],
     TextField(controller:email,keyboardType:TextInputType.emailAddress,decoration:const InputDecoration(labelText:'Email',border:OutlineInputBorder())),
-    const SizedBox(height:12),TextField(controller:password,obscureText:true,decoration:const InputDecoration(labelText:'Password',border:OutlineInputBorder())),
+    const SizedBox(height:12),TextField(controller:password,obscureText:true,decoration:InputDecoration(labelText:'Password',helperText:registerMode?'Minimal 10 karakter':'',border:const OutlineInputBorder())),
     if(error.isNotEmpty)Padding(padding:const EdgeInsets.all(8),child:Text(error,style:const TextStyle(color:Colors.red))),
-    const SizedBox(height:16),SizedBox(width:double.infinity,child:FilledButton(onPressed:busy?null:login,child:busy?const CircularProgressIndicator():const Text('Masuk'))),
+    const SizedBox(height:16),SizedBox(width:double.infinity,child:FilledButton(onPressed:busy?null:(registerMode?register:login),child:busy?const CircularProgressIndicator():Text(registerMode?'Buat akun':'Masuk'))),
+    TextButton(onPressed:busy?null:()=>setState(()=>registerMode=!registerMode),child:Text(registerMode?'Sudah punya akun? Masuk':'Belum punya akun? Daftar')),
     Builder(builder: (buttonContext) {
       final messenger = ScaffoldMessenger.of(buttonContext);
       return TextButton(
