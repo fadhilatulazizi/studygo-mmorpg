@@ -29,7 +29,7 @@ class _StudyGoAppState extends State<StudyGoApp> {
         foregroundColor: dark ? Colors.white : const Color(0xFF172B3A),
         elevation: 0,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: dark ? const Color(0xFF192630) : Colors.white,
         elevation: 0,
         margin: EdgeInsets.zero,
