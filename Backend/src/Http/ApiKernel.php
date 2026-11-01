@@ -59,6 +59,7 @@ final class ApiKernel
             }
 
             $user=$this->authenticatedUser();
+            if (($path === '/api/v1/admin/ads') && in_array($method,['GET','PUT'],true)) { $this->adminAds($method,$body,(int)$user['id']); return; }
             if ($method === 'GET' && preg_match('#^/api/v1/materials/(\\d+)/download$#',$path,$dm)) { $this->downloadMaterial((int)$user['id'],(int)$dm[1]); return; }
             if ($path === '/api/v1/admin/education/dashboard' && $method === 'GET') { $this->adminEducationDashboard((int)$user['id']); return; }
             if ($method === 'GET' && $path === '/api/v1/auth/sessions') { $this->listSessions((int)$user['id']); return; }
