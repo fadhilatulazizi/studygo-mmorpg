@@ -64,22 +64,21 @@ Set the config values:
 
 Use the host name shown by cPanel if it is not `localhost`.
 
-## 5. Apply database migrations
+## 5. Run the installation wizard
 
-Use phpMyAdmin and select the newly created empty database. Import in this exact order:
-1. `Backend/database/migrations/001_world_map.sql`
-2. `Backend/database/schema.sql`
-3. `Backend/database/migrations/000_studygo_auth.sql`
-4. `002_player_castles.sql`
-5. `003_resource_monster_spawns.sql`
-6. `004_march_system.sql`
-7. `005_march_settlement_recall.sql`
-8. `006_studygo_education.sql`
-9. `007_auth_security.sql`
-10. `008_admob_admin.sql`
-11. `009_education_platform.sql`
+The repository now includes a one-time wizard at `Backend/installer/index.php`.
 
-Important: use a fresh database. Migrations 007 and 009 contain ALTER TABLE statements and are not safe to import twice. If an import fails, stop and inspect the database before retrying; do not blindly re-import from the beginning.
+1. Upload the full `Backend/` directory to `/home/CPANEL_USER/studygo-backend/` as described above.
+2. Temporarily copy `studygo-backend/installer/index.php` to `studygo-backend/public/install.php`.
+3. Open `https://api.studygo.turaja.id/install.php`.
+4. Enter the cPanel MySQL host, database name, database username and password. Enter the AI provider key if ready; it can also be configured later in the private config file. Set an upload folder outside the document root.
+5. Submit once and wait for completion. The wizard tests the DB connection, applies migrations in dependency order, and writes `config/config.php` plus an installation lock.
+6. Immediately delete `studygo-backend/public/install.php` using File Manager.
+7. Open `https://api.studygo.turaja.id/health` and confirm the JSON health response.
+
+Use a brand-new, empty database dedicated to StudyGo. The wizard tracks completed files in `studygo_installer_migrations`. If an import fails, stop and inspect the database and PHP error log; do not delete the migration tracker or blindly retry. The installer is a temporary privileged tool and must not remain web-accessible.
+
+If you prefer phpMyAdmin, the dependency order is: `001_world_map.sql`, `000_studygo_auth.sql`, `schema.sql`, then migrations `002` through `009` in numeric order. Migrations 005, 007 and 009 contain ALTER TABLE statements and are not safe to execute twice.
 
 ## 6. Configure secrets and services
 
