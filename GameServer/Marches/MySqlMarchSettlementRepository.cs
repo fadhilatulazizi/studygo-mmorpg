@@ -52,10 +52,11 @@ public sealed class MySqlMarchSettlementRepository
         try
         {
             string serverId, destinationId, mission, state;
+            DateTime? returnAtUtc;
             long playerId;
             int travelSeconds;
             await using (var cmd = new MySqlCommand(
-                "SELECT server_id,player_id,destination_object_id,mission_type,march_state,travel_seconds FROM player_marches WHERE march_id=@id FOR UPDATE",
+                "SELECT server_id,player_id,destination_object_id,mission_type,march_state,travel_seconds,return_at FROM player_marches WHERE march_id=@id FOR UPDATE",
                 db, tx))
             {
                 cmd.Parameters.AddWithValue("@id", marchId);
@@ -71,10 +72,16 @@ public sealed class MySqlMarchSettlementRepository
                 mission = reader.GetString("mission_type");
                 state = reader.GetString("march_state");
                 travelSeconds = reader.GetInt32("travel_seconds");
+                returnAtUtc = reader.IsDBNull(reader.GetOrdinal("return_at")) ? null : DateTime.SpecifyKind(reader.GetDateTime("return_at"), DateTimeKind.Utc);
             }
 
             if (state == "returning")
             {
+                if (returnAtUtc is null || returnAtUtc.Value > DateTime.UtcNow)
+                {
+                    await tx.RollbackAsync(ct);
+                    return null;
+                }
                 await ReleaseTroopsAsync(db, tx, marchId, ct);
                 await using var finish = new MySqlCommand(
                     "UPDATE player_marches SET march_state='returned' WHERE march_id=@id AND march_state='returning' AND return_at<=UTC_TIMESTAMP()",
