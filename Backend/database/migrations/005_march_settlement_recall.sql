@@ -2,7 +2,7 @@
 -- Requires 004_march_system.sql and 003_resource_monster_spawns.sql.
 
 ALTER TABLE player_marches
-    ADD COLUMN IF NOT EXISTS return_seconds INT UNSIGNED NULL,
+    ADD COLUMN return_seconds INT UNSIGNED NULL,
     ADD COLUMN IF NOT EXISTS mission_settled_at DATETIME NULL,
     ADD COLUMN IF NOT EXISTS recall_requested_at DATETIME NULL,
     ADD COLUMN IF NOT EXISTS result_json JSON NULL;
