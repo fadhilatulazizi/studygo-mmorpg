@@ -40,13 +40,13 @@ final class EducationApi
         if($userId<=0 || $transactionId==='' || strlen($transactionId)>190) throw new \InvalidArgumentException('invalid_reward_payload');
         $this->pdo->beginTransaction();
         try {
-            $q=$this->pdo->prepare("SELECT questions_used,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE() FOR UPDATE");
+            $q=$this->pdo->prepare("SELECT questions_used,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");
             $q->execute([$userId]); $row=$q->fetch();
-            if(!$row) { $this->pdo->prepare("INSERT INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,UTC_DATE())")->execute([$userId]); $row=['questions_used'=>0,'reward_ads_used'=>0]; }
+            if(!$row) { $this->pdo->prepare("INSERT INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)))")->execute([$userId]); $row=['questions_used'=>0,'reward_ads_used'=>0]; }
             if((int)$row['reward_ads_used']>=3) throw new \DomainException('daily_reward_limit_reached');
             $ins=$this->pdo->prepare("INSERT INTO study_ad_reward_events(provider,transaction_id,user_id,reward_amount) VALUES(?,?,?,3)");
             $ins->execute([$provider,$transactionId,$userId]);
-            $this->pdo->prepare("UPDATE study_ai_daily_usage SET rewarded_questions=rewarded_questions+3,reward_ads_used=reward_ads_used+1 WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$userId]);
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET rewarded_questions=rewarded_questions+3,reward_ads_used=reward_ads_used+1 WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$userId]);
             $this->pdo->commit();
             return $this->quota($userId);
         } catch (\Throwable $e) { if($this->pdo->inTransaction()) $this->pdo->rollBack(); throw $e; }
@@ -86,25 +86,25 @@ final class EducationApi
     private function updateNote(int $u,int $id,array $b): array {$old=$this->getNote($u,$id);$title=trim((string)($b['title']??$old['title']));$content=(string)($b['content']??$old['content']);if($title===''||mb_strlen($title)>180||$content===''||mb_strlen($content)>100000)throw new \InvalidArgumentException('invalid_note');$sub=array_key_exists('subjectId',$b)?$this->nullableInt($b['subjectId']):$old['subject_id'];$q=$this->pdo->prepare("UPDATE study_notes SET title=?,content=?,subject_id=? WHERE id=? AND user_id=?");$q->execute([$title,$content,$sub,$id,$u]);return $this->getNote($u,$id);}
     private function getNote(int $u,int $id): array {$q=$this->pdo->prepare("SELECT id,subject_id,title,content,created_at,updated_at FROM study_notes WHERE id=? AND user_id=?");$q->execute([$id,$u]);$r=$q->fetch();if(!$r)throw new \InvalidArgumentException('note_not_found');return $r;}
     private function deleteNote(int $u,int $id): void {$q=$this->pdo->prepare("DELETE FROM study_notes WHERE id=? AND user_id=?");$q->execute([$id,$u]);if(!$q->rowCount())throw new \InvalidArgumentException('note_not_found');}
-    private function quota(int $u): array {$q=$this->pdo->prepare("SELECT questions_used,rewarded_questions,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE()");$q->execute([$u]);$r=$q->fetch()?:['questions_used'=>0,'rewarded_questions'=>0,'reward_ads_used'=>0];$limit=5+(int)$r['rewarded_questions'];return ['date'=>gmdate('Y-m-d'),'timezone'=>'UTC','freeLimit'=>5,'bonusQuestions'=>(int)$r['rewarded_questions'],'rewardAdsUsed'=>(int)$r['reward_ads_used'],'rewardAdsRemaining'=>max(0,3-(int)$r['reward_ads_used']),'questionsUsed'=>(int)$r['questions_used'],'questionsRemaining'=>max(0,$limit-(int)$r['questions_used']),'dailyMaximum'=>14];}
+    private function quota(int $u): array {$q=$this->pdo->prepare("SELECT questions_used,rewarded_questions,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))");$q->execute([$u]);$r=$q->fetch()?:['questions_used'=>0,'rewarded_questions'=>0,'reward_ads_used'=>0];$limit=5+(int)$r['rewarded_questions'];return ['date'=>gmdate('Y-m-d'),'timezone'=>'UTC','freeLimit'=>5,'bonusQuestions'=>(int)$r['rewarded_questions'],'rewardAdsUsed'=>(int)$r['reward_ads_used'],'rewardAdsRemaining'=>max(0,3-(int)$r['reward_ads_used']),'questionsUsed'=>(int)$r['questions_used'],'questionsRemaining'=>max(0,$limit-(int)$r['questions_used']),'dailyMaximum'=>14];}
 
     private function askTutor(int $u,array $b): string {
         $prompt=trim((string)($b['question']??''));if($prompt===''||mb_strlen($prompt)>12000)throw new \InvalidArgumentException('invalid_question');
         $requestId=(string)($b['requestId']??'');if(!preg_match('/^[0-9a-fA-F-]{36}$/',$requestId))throw new \InvalidArgumentException('valid_request_id_required');
         $this->pdo->beginTransaction();
         try {
-            $this->pdo->prepare("INSERT IGNORE INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,UTC_DATE())")->execute([$u]);
-            $q=$this->pdo->prepare("SELECT questions_used,rewarded_questions FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE() FOR UPDATE");$q->execute([$u]);$usage=$q->fetch();
+            $this->pdo->prepare("INSERT IGNORE INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)))")->execute([$u]);
+            $q=$this->pdo->prepare("SELECT questions_used,rewarded_questions FROM study_ai_daily_usage WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");$q->execute([$u]);$usage=$q->fetch();
             if((int)$usage['questions_used'] >= 5+(int)$usage['rewarded_questions'])throw new \DomainException('daily_ai_quota_exceeded');
             $dup=$this->pdo->prepare("SELECT id FROM study_ai_requests WHERE user_id=? AND request_id=?");$dup->execute([$u,$requestId]);if($dup->fetch())throw new \DomainException('duplicate_request_id');
-            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=questions_used+1 WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$u]);
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=questions_used+1 WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$u]);
             $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
             $this->pdo->prepare("INSERT INTO study_ai_requests(user_id,request_id,provider,model,prompt_hash) VALUES(?,?,?,?,?)")->execute([$u,$requestId,$provider,$model,hash('sha256',$prompt)]);
             $this->pdo->commit();
         } catch (\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
         try { return $this->callProvider($prompt); }
         catch (\Throwable $e) {
-            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=GREATEST(questions_used-1,0) WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$u]);
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=GREATEST(questions_used-1,0) WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$u]);
             $this->pdo->prepare("DELETE FROM study_ai_requests WHERE user_id=? AND request_id=?")->execute([$u,$requestId]);
             throw $e;
         }
