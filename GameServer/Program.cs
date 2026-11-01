@@ -1,20 +1,26 @@
 using StudyGo.GameServer.WorldMap;
 using StudyGo.GameServer.Marches;
+using StudyGo.GameServer.Auth;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var gameDatabase = builder.Configuration.GetConnectionString("GameDatabase");
+var gameApiEnabled = builder.Services.AddGameJwtAuthentication(builder.Configuration);
 if (!string.IsNullOrWhiteSpace(gameDatabase))
 {
     builder.Services.AddSingleton(new MySqlWorldSpawnRepository(gameDatabase));
     builder.Services.AddSingleton(new MySqlMarchRepository(gameDatabase));
     builder.Services.AddSingleton(new MySqlMarchSettlementRepository(gameDatabase));
+    builder.Services.AddSingleton(new MySqlMarchApiRepository(gameDatabase));
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.WorldSpawnWorker>();
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.MarchArrivalWorker>();
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.MarchSettlementWorker>();
 }
 
 var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
 
 var worldMap = new WorldMapService(new WorldMapOptions
 {
@@ -27,7 +33,8 @@ app.MapGet("/health", () => Results.Ok(new
 {
     ok = true,
     service = "studygo-game-server",
-    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-spawn-march-and-settlement-workers"
+    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-spawn-march-and-settlement-workers",
+    marchApiEnabled = gameApiEnabled
 }));
 
 app.MapGet("/world/region", (string serverId, int regionX, int regionY) =>
@@ -82,6 +89,70 @@ app.MapGet("/world/search", (
     }
 });
 
+
+var marchApi = app.MapGroup("/api/game").RequireAuthorization();
+
+marchApi.MapPost("/marches", async (
+    SendMarchRequest request, ClaimsPrincipal user,
+    MySqlMarchApiRepository identity, MySqlMarchRepository marches,
+    CancellationToken ct) =>
+{
+    if (!long.TryParse(user.FindFirstValue("sub"), out var userId) || userId <= 0)
+        return Results.Unauthorized();
+    var serverId = user.FindFirstValue("server_id");
+    if (string.IsNullOrWhiteSpace(serverId)) return Results.Unauthorized();
+    var playerId = await identity.ResolvePlayerIdAsync(userId, ct);
+    if (playerId is null) return Results.NotFound(new { error = "game_player_not_found" });
+    var troops = request.Troops?.Select(t => new MarchTroopRequest(t.TroopCode ?? "", t.Quantity)).ToArray()
+        ?? Array.Empty<MarchTroopRequest>();
+    var result = await marches.SendAsync(serverId, playerId.Value, request.RequestId ?? "",
+        request.DestinationObjectId ?? "", request.MissionType ?? "", troops, ct);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+});
+
+marchApi.MapGet("/marches", async (
+    bool? includeReturned, ClaimsPrincipal user, MySqlMarchApiRepository identity,
+    CancellationToken ct) =>
+{
+    if (!long.TryParse(user.FindFirstValue("sub"), out var userId) || userId <= 0)
+        return Results.Unauthorized();
+    var serverId = user.FindFirstValue("server_id");
+    if (string.IsNullOrWhiteSpace(serverId)) return Results.Unauthorized();
+    var playerId = await identity.ResolvePlayerIdAsync(userId, ct);
+    if (playerId is null) return Results.NotFound(new { error = "game_player_not_found" });
+    var items = await identity.GetPlayerMarchesAsync(serverId, playerId.Value, includeReturned ?? false, ct);
+    return Results.Ok(new { serverId, count = items.Count, marches = items });
+});
+
+marchApi.MapPost("/marches/{marchId}/recall", async (
+    string marchId, ClaimsPrincipal user, MySqlMarchApiRepository identity,
+    MySqlMarchSettlementRepository settlement, CancellationToken ct) =>
+{
+    if (!long.TryParse(user.FindFirstValue("sub"), out var userId) || userId <= 0)
+        return Results.Unauthorized();
+    var serverId = user.FindFirstValue("server_id");
+    if (string.IsNullOrWhiteSpace(serverId)) return Results.Unauthorized();
+    var playerId = await identity.ResolvePlayerIdAsync(userId, ct);
+    if (playerId is null) return Results.NotFound(new { error = "game_player_not_found" });
+    var result = await settlement.RecallAsync(serverId, playerId.Value, marchId, ct);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+});
+
+marchApi.MapGet("/marches/{marchId}/scout-report", async (
+    string marchId, ClaimsPrincipal user, MySqlMarchApiRepository identity,
+    CancellationToken ct) =>
+{
+    if (!long.TryParse(user.FindFirstValue("sub"), out var userId) || userId <= 0)
+        return Results.Unauthorized();
+    var serverId = user.FindFirstValue("server_id");
+    if (string.IsNullOrWhiteSpace(serverId)) return Results.Unauthorized();
+    var playerId = await identity.ResolvePlayerIdAsync(userId, ct);
+    if (playerId is null) return Results.NotFound(new { error = "game_player_not_found" });
+    var report = await identity.GetScoutReportAsync(serverId, playerId.Value, marchId, ct);
+    return report is null ? Results.NotFound(new { error = "scout_report_not_found_or_expired" })
+        : Results.Content(report, "application/json");
+});
+
 app.Map("/ws", async context =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
@@ -116,3 +187,6 @@ app.Map("/ws", async context =>
 
 app.UseWebSockets();
 app.Run();
+
+public sealed record SendMarchRequest(string? RequestId, string? DestinationObjectId, string? MissionType, List<SendMarchTroop>? Troops);
+public sealed record SendMarchTroop(string? TroopCode, long Quantity);
