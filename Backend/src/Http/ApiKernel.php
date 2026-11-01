@@ -44,7 +44,7 @@ final class ApiKernel
                 return;
             }
             if ($method === 'POST' && $path === '/api/v1/game/token') { $this->gameToken($body); return; }
-            if ($method === 'POST' && $path === '/internal/ads/reward-callback') {
+            if ($method === 'GET' && $path === '/internal/ads/admob-ssv') {\n                $this->admobSsv(); return;\n            }\n            if ($method === 'POST' && $path === '/internal/ads/reward-callback') {
                 $education=new EducationApi($this->pdo,$this->config);
                 $result=$education->rewardCallback($body,(string)($_SERVER['HTTP_X_STUDYGO_SIGNATURE']??''));
                 $this->respond(200,$result); return;
@@ -178,7 +178,88 @@ final class ApiKernel
         $this->respond(200,['token'=>$jwt->issue((int)$u['id'],$server),'tokenType'=>'Bearer','expiresIn'=>(int)$this->config['game_jwt']['ttl'],'serverId'=>$server]);
     }
 
-    private function jsonBody(): array
+
+    private function admobSsv(): void
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') { $this->respond(405,['error'=>'method_not_allowed']); return; }
+        $settings=$this->pdo->query("SELECT setting_key,setting_value FROM studygo_admin_settings WHERE setting_key IN ('ads.admob_ssv_enabled','ads.admob_rewarded_unit_id_android','ads.admob_rewarded_unit_id_ios','ads.admob_reward_item','ads.admob_reward_amount')")->fetchAll(PDO::FETCH_KEY_PAIR);
+        if (($settings['ads.admob_ssv_enabled'] ?? '0') !== '1') { http_response_code(503); echo 'SSV disabled'; return; }
+        $params=(new AdMobSsvVerifier())->verify((string)($_SERVER['QUERY_STRING'] ?? ''));
+        $allowedUnits=array_filter([$settings['ads.admob_rewarded_unit_id_android']??'', $settings['ads.admob_rewarded_unit_id_ios']??'']);
+        $unit=(string)$params['ad_unit'];
+        $rewardItem=(string)($settings['ads.admob_reward_item']??'studygo_questions');
+        $rewardAmount=(int)($settings['ads.admob_reward_amount']??3);
+        $userId=filter_var($params['user_id'],FILTER_VALIDATE_INT);
+        $amount=filter_var($params['reward_amount'],FILTER_VALIDATE_INT);
+        $eventMs=filter_var($params['timestamp'],FILTER_VALIDATE_INT);
+        $transaction=trim((string)$params['transaction_id']);
+        if (!$allowedUnits || !in_array($unit,$allowedUnits,true) || $userId===false || $userId<=0 ||
+            $amount===false || $amount!==$rewardAmount || (string)$params['reward_item']!==$rewardItem ||
+            $eventMs===false || $transaction==='' || strlen($transaction)>190) {
+            http_response_code(400); echo 'Invalid reward parameters'; return;
+        }
+        $nowMs=(int)floor(microtime(true)*1000);
+        if ($eventMs > $nowMs+300000 || $eventMs < $nowMs-86400000) { http_response_code(400); echo 'Stale reward callback'; return; }
+        $this->pdo->beginTransaction();
+        try {
+            $u=$this->pdo->prepare("SELECT id FROM studygo_users WHERE id=? AND account_status='active' FOR UPDATE");
+            $u->execute([$userId]);
+            if (!$u->fetch()) { $this->pdo->rollBack(); http_response_code(400); echo 'Unknown user'; return; }
+            $this->pdo->prepare("INSERT INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))) ON DUPLICATE KEY UPDATE user_id=VALUES(user_id)")->execute([$userId]);
+            $q=$this->pdo->prepare("SELECT reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");
+            $q->execute([$userId]); $usage=$q->fetch();
+            if ((int)$usage['reward_ads_used']>=3) { $this->pdo->rollBack(); http_response_code(200); echo 'Reward limit reached'; return; }
+            $keyId=(int)($_GET['key_id']??0);
+            $this->pdo->prepare("INSERT INTO study_admob_ssv_events(transaction_id,user_id,ad_unit,reward_item,reward_amount,event_timestamp,key_id) VALUES(?,?,?,?,?,?,?)")
+                ->execute([$transaction,$userId,$unit,$rewardItem,$rewardAmount,$eventMs,$keyId]);
+            $this->pdo->prepare("INSERT INTO study_ad_reward_events(provider,transaction_id,user_id,reward_amount) VALUES('admob',?,?,?)")
+                ->execute([$transaction,$userId,$rewardAmount]);
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET rewarded_questions=rewarded_questions+?,reward_ads_used=reward_ads_used+1 WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")
+                ->execute([$rewardAmount,$userId]);
+            $this->pdo->commit();
+            http_response_code(200); echo 'OK';
+        } catch (\PDOException $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            if ($e->getCode()==='23000') { http_response_code(200); echo 'Already processed'; return; }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    private function adminAds(string $method,array $body,int $userId): void
+    {
+        $role=$this->pdo->prepare("SELECT admin_role FROM studygo_admin_users WHERE user_id=?");
+        $role->execute([$userId]); $adminRole=$role->fetchColumn();
+        if (!$adminRole || !in_array($adminRole,['owner','admin','editor'],true)) { $this->respond(403,['error'=>'admin_access_required']); return; }
+        $keys=[
+            'androidAppId'=>'ads.admob_app_id_android','iosAppId'=>'ads.admob_app_id_ios',
+            'androidBannerUnitId'=>'ads.admob_banner_unit_id_android','iosBannerUnitId'=>'ads.admob_banner_unit_id_ios',
+            'androidRewardedUnitId'=>'ads.admob_rewarded_unit_id_android','iosRewardedUnitId'=>'ads.admob_rewarded_unit_id_ios',
+            'androidInterstitialUnitId'=>'ads.admob_interstitial_unit_id_android','iosInterstitialUnitId'=>'ads.admob_interstitial_unit_id_ios',
+            'rewardItem'=>'ads.admob_reward_item','rewardAmount'=>'ads.admob_reward_amount','ssvEnabled'=>'ads.admob_ssv_enabled'
+        ];
+        if ($method==='PUT') {
+            foreach ($keys as $field=>$key) {
+                if (!array_key_exists($field,$body)) continue;
+                $value=$body[$field];
+                if ($field==='ssvEnabled') $value=$value ? '1':'0';
+                elseif ($field==='rewardAmount') { $n=filter_var($value,FILTER_VALIDATE_INT); if($n===false||$n<1||$n>100) throw new \InvalidArgumentException('invalid_reward_amount'); $value=(string)$n; }
+                else { $value=trim((string)$value); if(strlen($value)>190) throw new \InvalidArgumentException('ad_setting_too_long'); }
+                $this->pdo->prepare("INSERT INTO studygo_admin_settings(setting_key,setting_value,updated_by) VALUES(?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)")
+                    ->execute([$key,$value,$userId]);
+            }
+        }
+        $q=$this->pdo->prepare("SELECT setting_key,setting_value FROM studygo_admin_settings WHERE setting_key LIKE 'ads.admob_%'");
+        $q->execute(); $rows=$q->fetchAll(PDO::FETCH_KEY_PAIR);
+        $result=[];
+        foreach($keys as $field=>$key) $result[$field]=$rows[$key]??'';
+        $result['ssvEnabled']=($result['ssvEnabled']==='1');
+        $result['rewardAmount']=(int)($result['rewardAmount']?:3);
+        $this->respond(200,['ads'=>$result]);
+    }
+\n    private function jsonBody(): array
     {
         $raw=file_get_contents('php://input')?:'';if($raw==='')return [];
         $v=json_decode($raw,true);if(!is_array($v))throw new \InvalidArgumentException('invalid_json_body');return $v;
