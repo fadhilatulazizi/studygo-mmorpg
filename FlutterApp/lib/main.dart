@@ -86,6 +86,7 @@ class _StudyHomeState extends State<StudyHome> {
   ]);
   Widget _planner()=>ListView(padding:const EdgeInsets.all(16),children:[
     Row(children:[Expanded(child:TextField(controller:task,decoration:const InputDecoration(labelText:'Tugas baru',border:OutlineInputBorder()))),IconButton(onPressed:()=>run(()async{await widget.api.createTask(task.text);task.clear();}),icon:const Icon(Icons.add_circle))]),
+    OutlinedButton.icon(onPressed:()=>run(()async{await widget.api.createReminder(task.text.isEmpty?'Waktunya belajar':task.text,DateTime.now().add(const Duration(hours:1)),message:'Pengingat dari StudyGo');}),icon:const Icon(Icons.alarm_add),label:const Text('Ingatkan 1 jam lagi')),
     const SizedBox(height:12),FutureBuilder<List<dynamic>>(future:widget.api.tasks(),builder:(c,s)=>s.hasError?Text('${s.error}'):Column(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.task_alt),title:Text(e['title'].toString()),subtitle:Text(e['status'].toString()))).toList())),
   ]);
   Widget _materials()=>ListView(padding:const EdgeInsets.all(16),children:[
