@@ -63,3 +63,43 @@ jobs:
             grep -Eiq 'CREATE TABLE|ALTER TABLE|INSERT INTO|UPDATE ' "$file"
             echo "Validated $file"
           done
+
+  mysql-integration:
+    name: MySQL migration and integration smoke tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-root-password
+          MYSQL_DATABASE: studygo_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ptest-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, fileinfo, openssl
+      - name: Apply schema and migrations
+        env:
+          MYSQL_PWD: test-root-password
+        run: |
+          set -euo pipefail
+          mysql -h127.0.0.1 -uroot studygo_test < Backend/database/migrations/001_world_map.sql
+          mysql -h127.0.0.1 -uroot studygo_test < Backend/database/schema.sql
+          mysql -h127.0.0.1 -uroot studygo_test < Backend/database/migrations/000_studygo_auth.sql
+          for file in Backend/database/migrations/002_*.sql Backend/database/migrations/003_*.sql Backend/database/migrations/004_*.sql Backend/database/migrations/005_*.sql Backend/database/migrations/006_*.sql Backend/database/migrations/007_*.sql Backend/database/migrations/008_*.sql Backend/database/migrations/009_*.sql; do
+            mysql -h127.0.0.1 -uroot studygo_test < "$file"
+          done
+      - name: Run database integration smoke tests
+        env:
+          TEST_DB_DSN: mysql:host=127.0.0.1;dbname=studygo_test;charset=utf8mb4
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: test-root-password
+        run: php Backend/tests/integration.php
