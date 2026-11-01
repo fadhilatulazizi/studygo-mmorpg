@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StudyGo API Tester</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#101827;color:#e5edf7}
+*{box-sizing:border-box}body{margin:0;padding:20px;max-width:760px;margin-inline:auto}
+h1{font-size:25px;margin:8px 0}p{color:#aebed0;line-height:1.5}
+.card{background:#19263a;border:1px solid #30445f;border-radius:14px;padding:16px;margin:14px 0}
+label{display:block;font-size:14px;color:#c6d4e5;margin:10px 0 5px}
+input{width:100%;padding:12px;border-radius:9px;border:1px solid #49617e;background:#0f1b2b;color:#fff;font-size:16px}
+button{padding:11px 14px;border:0;border-radius:9px;background:#14a38b;color:#06251f;font-weight:700;font-size:14px;margin:8px 6px 0 0}
+button.secondary{background:#314762;color:#e5edf7}button:disabled{opacity:.5}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1421;border-radius:9px;padding:12px;min-height:60px;color:#d8e7f7;font-size:13px}
+.small{font-size:12px;color:#91a6bd}.status{font-weight:700}
+</style>
+</head>
+<body>
+<h1>StudyGo API Tester</h1>
+<p>Halaman sementara untuk memeriksa API dari browser. Gunakan email uji dan kata sandi khusus—jangan gunakan kata sandi akun pribadi.</p>
+<div class="card">
+<strong>1. Koneksi server</strong><br>
+<button onclick="runHealth()">Tes koneksi (/health)</button>
+</div>
+<div class="card">
+<strong>2. Registrasi akun uji</strong>
+<label>Nama tampilan</label><input id="displayName" maxlength="40" autocomplete="name" placeholder="Nama uji">
+<label>Email</label><input id="email" type="email" autocomplete="email" placeholder="email-uji@example.com">
+<label>Kata sandi (minimal 10 karakter)</label><input id="password" type="password" autocomplete="new-password" minlength="10" placeholder="Kata sandi khusus untuk pengujian">
+<button onclick="register()">Daftar akun uji</button>
+<button class="secondary" onclick="login()">Login</button>
+</div>
+<div class="card">
+<strong>3. Pemeriksaan akun dan kuota AI</strong><br>
+<button onclick="me()">Tes sesi login (/auth/me)</button>
+<button onclick="quota()">Tes kuota AI</button>
+<button class="secondary" onclick="clearSession()">Hapus sesi dari halaman ini</button>
+<p class="small">Sesi hanya disimpan sementara di memori halaman ini dan hilang saat halaman ditutup atau dimuat ulang.</p>
+</div>
+<div class="card">
+<strong>Hasil pengujian</strong>
+<div id="status" class="status">Belum ada tes dijalankan.</div>
+<pre id="output">Hasil akan tampil di sini.</pre>
+</div>
+<p class="small">Peringatan: siapa pun yang mengetahui alamat halaman ini dapat membukanya. Setelah selesai menguji, hapus api-test.html dari folder public hosting. Jangan kirim token atau kata sandi kepada siapa pun.</p>
+<script>
+const API = location.origin;
+let accessToken = '';
+let refreshToken = '';
+const $ = id => document.getElementById(id);
+function show(label,data,ok=true){
+  $('status').textContent = label;
+  $('status').style.color = ok ? '#5ee0b5' : '#ff9b9b';
+  $('output').textContent = typeof data === 'string' ? data : JSON.stringify(data,null,2);
+}
+async function request(path,method='GET',body=null,auth=false){
+  const headers={'Accept':'application/json'};
+  if(body!==null) headers['Content-Type']='application/json';
+  if(auth && accessToken) headers.Authorization='Bearer '+accessToken;
+  const response=await fetch(API+path,{method,headers,body:body===null?undefined:JSON.stringify(body),credentials:'omit'});
+  let data; const raw=await response.text();
+  try{data=raw?JSON.parse(raw):{};}catch{data={raw:raw.slice(0,1200)};}
+  return {status:response.status,ok:response.ok,data};
+}
+async function runHealth(){try{const r=await request('/health');show('Health: HTTP '+r.status,r,r.ok);}catch(e){show('Koneksi gagal',String(e),false);}}
+async function register(){
+ const displayName=$('displayName').value.trim(),email=$('email').value.trim(),password=$('password').value;
+ if(!displayName||!email||password.length<10){show('Periksa nama, email, dan kata sandi minimal 10 karakter.',{},false);return;}
+ try{const r=await request('/api/v1/auth/register','POST',{displayName,email,password});show('Registrasi: HTTP '+r.status,r,r.ok);}catch(e){show('Registrasi gagal',String(e),false);}
+}
+async function login(){
+ const email=$('email').value.trim(),password=$('password').value;
+ if(!email||!password){show('Isi email dan kata sandi terlebih dahulu.',{},false);return;}
+ try{
+  const r=await request('/api/v1/auth/login','POST',{email,password});
+  if(r.ok && r.data.accessToken){accessToken=r.data.accessToken;refreshToken=r.data.refreshToken||'';const safe={...r.data,accessToken:'[TERSIMPAN SEMENTARA]',refreshToken:refreshToken?'[TERSIMPAN SEMENTARA]':''};show('Login berhasil: HTTP '+r.status,safe,true);}
+  else show('Login: HTTP '+r.status,r,false);
+ }catch(e){show('Login gagal',String(e),false);}
+}
+async function me(){if(!accessToken){show('Belum login. Jalankan Login terlebih dahulu.',{},false);return;}try{const r=await request('/api/v1/auth/me','GET',null,true);show('Auth/me: HTTP '+r.status,r,r.ok);}catch(e){show('Auth/me gagal',String(e),false);}}
+async function quota(){if(!accessToken){show('Belum login. Jalankan Login terlebih dahulu.',{},false);return;}try{const r=await request('/api/v1/ai/quota','GET',null,true);show('Kuota AI: HTTP '+r.status,r,r.ok);}catch(e){show('Tes kuota gagal',String(e),false);}}
+function clearSession(){accessToken='';refreshToken='';$('password').value='';show('Sesi sementara sudah dibersihkan dari halaman ini.',{session:'cleared'},true);}
+</script>
+</body>
+</html>
