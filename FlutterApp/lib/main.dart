@@ -54,7 +54,24 @@ class _LoginPageState extends State<LoginPage> {
     const SizedBox(height:12),TextField(controller:password,obscureText:true,decoration:const InputDecoration(labelText:'Password',border:OutlineInputBorder())),
     if(error.isNotEmpty)Padding(padding:const EdgeInsets.all(8),child:Text(error,style:const TextStyle(color:Colors.red))),
     const SizedBox(height:16),SizedBox(width:double.infinity,child:FilledButton(onPressed:busy?null:login,child:busy?const CircularProgressIndicator():const Text('Masuk'))),
-    TextButton(onPressed:busy?null:()async{try{await widget.api.forgotPassword(email.text.trim());if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Jika akun terdaftar, tautan reset password akan dikirim.')));}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(e.toString())));}},child:const Text('Lupa password?')),
+    Builder(builder: (buttonContext) {
+      final messenger = ScaffoldMessenger.of(buttonContext);
+      return TextButton(
+        onPressed: busy ? null : () async {
+          try {
+            await widget.api.forgotPassword(email.text.trim());
+            if (!mounted) return;
+            messenger.showSnackBar(const SnackBar(
+              content: Text('Jika akun terdaftar, tautan reset password akan dikirim.'),
+            ));
+          } catch (e) {
+            if (!mounted) return;
+            messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+          }
+        },
+        child: const Text('Lupa password?'),
+      );
+    }),
   ])))));
 }
 class StudyHome extends StatefulWidget {
