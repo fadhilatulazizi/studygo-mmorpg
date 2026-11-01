@@ -16,6 +16,14 @@ return [
         'access_ttl' => 900,
         'refresh_ttl_days' => 30,
     ],
+    'mail' => [
+        'from_address' => getenv('MAIL_FROM_ADDRESS') ?: '',
+        'from_name' => getenv('MAIL_FROM_NAME') ?: 'StudyGo',
+        'action_url' => getenv('MAIL_ACTION_URL') ?: '',
+    ],
+    'auth' => [
+        'require_email_verification' => filter_var(getenv('AUTH_REQUIRE_EMAIL_VERIFICATION') ?: '0', FILTER_VALIDATE_BOOL),
+    ],
     'ai' => [
         'provider' => getenv('AI_PROVIDER') ?: 'gemini',
         'model' => getenv('AI_MODEL') ?: 'gemini-2.5-flash',
