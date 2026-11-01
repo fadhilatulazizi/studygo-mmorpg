@@ -123,24 +123,28 @@ class StudyGoApi {
       (await _request('POST', '/api/v1/planner/tasks', body: {'title': title, 'priority': priority}))['task'] as Map<String, dynamic>;
   Future<List<dynamic>> materials() async => (await _request('GET', '/api/v1/materials'))['materials'] as List<dynamic>;
   Future<void> uploadMaterial(PlatformFile file, {String? title}) async {
-    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/v1/materials'));
-    request.headers['Authorization'] = 'Bearer $_accessToken';
-    if (title != null) request.fields['title'] = title;
-    if (file.path != null) {
-      request.files.add(await http.MultipartFile.fromPath('file', file.path!));
-    } else if (file.bytes != null) {
-      request.files.add(http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name));
-    } else {
-      throw ApiException(400, 'file_not_available');
+    Future<http.StreamedResponse> sendUpload() async {
+      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/v1/materials'));
+      request.headers['Authorization'] = 'Bearer $_accessToken';
+      request.headers['X-Device-Label'] = 'StudyGo Flutter';
+      if (title != null) request.fields['title'] = title;
+      if (file.path != null) {
+        request.files.add(await http.MultipartFile.fromPath('file', file.path!));
+      } else if (file.bytes != null) {
+        request.files.add(http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name));
+      } else {
+        throw ApiException(400, 'file_not_available');
+      }
+      return request.send();
     }
-    var streamed = await request.send();
+    var streamed = await sendUpload();
     if (streamed.statusCode == 401 && _refreshToken != null) {
       await refresh();
-      request.headers['Authorization'] = 'Bearer $_accessToken';
-      streamed = await request.send();
+      streamed = await sendUpload();
     }
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-      throw ApiException(streamed.statusCode, 'upload_failed');
+      final body = await streamed.stream.bytesToString();
+      throw ApiException(streamed.statusCode, body.isEmpty ? 'upload_failed' : body);
     }
   }
   Future<List<dynamic>> notifications() async => (await _request('GET', '/api/v1/notifications'))['notifications'] as List<dynamic>;
