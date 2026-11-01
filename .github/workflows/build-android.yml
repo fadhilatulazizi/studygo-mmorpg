@@ -98,11 +98,11 @@ jobs:
 
       - name: Build installable debug APK
         working-directory: FlutterApp
-        run: flutter build apk --debug --dart-define=STUDYGO_API_URL=https://YOUR_API_HOST
+        run: flutter build apk --debug --dart-define=STUDYGO_API_URL=https://api.studygo.turaja.id
 
       - name: Build release Android App Bundle
         working-directory: FlutterApp
-        run: flutter build appbundle --release --dart-define=STUDYGO_API_URL=https://YOUR_API_HOST
+        run: flutter build appbundle --release --dart-define=STUDYGO_API_URL=https://api.studygo.turaja.id
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
