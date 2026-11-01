@@ -11,6 +11,12 @@ final class EducationApi
 
     public function handle(string $method, string $path, array $body, int $userId): ?array
     {
+        if ($method === 'GET' && $path === '/api/v1/materials') return ['status'=>200,'data'=>['materials'=>$this->materials($userId)]];
+        if ($method === 'POST' && $path === '/api/v1/materials') return ['status'=>201,'data'=>['material'=>$this->uploadMaterial($userId,$body)]];
+        if ($method === 'GET' && $path === '/api/v1/reminders') return ['status'=>200,'data'=>['reminders'=>$this->reminders($userId)]];
+        if ($method === 'POST' && $path === '/api/v1/reminders') return ['status'=>201,'data'=>['reminder'=>$this->createReminder($userId,$body)]];
+        if ($method === 'GET' && $path === '/api/v1/notifications') return ['status'=>200,'data'=>['notifications'=>$this->notifications($userId)]];
+        if ($method === 'POST' && preg_match('#^/api/v1/notifications/(\\d+)/read$#',$path,$nm)) { $this->markNotificationRead($userId,(int)$nm[1]); return ['status'=>200,'data'=>['read'=>true]]; }
         if ($method === 'GET' && $path === '/api/v1/subjects') return ['status'=>200,'data'=>['subjects'=>$this->subjects()]];
         if ($method === 'GET' && $path === '/api/v1/planner/tasks') return ['status'=>200,'data'=>['tasks'=>$this->tasks($userId)]];
         if ($method === 'POST' && $path === '/api/v1/planner/tasks') return ['status'=>201,'data'=>['task'=>$this->createTask($userId,$body)]];
@@ -50,6 +56,49 @@ final class EducationApi
             $this->pdo->commit();
             return $this->quota($userId);
         } catch (\Throwable $e) { if($this->pdo->inTransaction()) $this->pdo->rollBack(); throw $e; }
+    }
+
+    private function materials(int $u): array
+    {
+        $q=$this->pdo->prepare("SELECT id,subject_id,title,description,original_name,mime_type,file_size,material_type,created_at FROM study_materials WHERE user_id=? ORDER BY created_at DESC LIMIT 200");$q->execute([$u]);return $q->fetchAll();
+    }
+    private function uploadMaterial(int $u,array $b): array
+    {
+        if(!isset($_FILES['file'])||$_FILES['file']['error']!==UPLOAD_ERR_OK)throw new \InvalidArgumentException('material_file_required');
+        $file=$_FILES['file'];$max=(int)($this->config['uploads']['max_bytes']??52428800);
+        if($file['size']<1||$file['size']>$max)throw new \InvalidArgumentException('material_file_size_invalid');
+        $finfo=new \finfo(FILEINFO_MIME_TYPE);$mime=$finfo->file($file['tmp_name']);
+        $allowed=['application/pdf'=>'pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.presentationml.presentation'=>'pptx','video/mp4'=>'video','video/webm'=>'video','image/jpeg'=>'image','image/png'=>'image','image/webp'=>'image'];
+        if(!isset($allowed[$mime]))throw new \InvalidArgumentException('unsupported_material_type');
+        $dir=(string)($this->config['uploads']['directory']??(sys_get_temp_dir().'/studygo-uploads'));
+        if(!is_dir($dir)&&!mkdir($dir,0700,true)&&!is_dir($dir))throw new \RuntimeException('upload_storage_unavailable');
+        $stored=bin2hex(random_bytes(24));$target=rtrim($dir,DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$stored;
+        if(!move_uploaded_file($file['tmp_name'],$target))throw new \RuntimeException('upload_move_failed');
+        chmod($target,0600);
+        $title=trim((string)($b['title']??pathinfo($file['name'],PATHINFO_FILENAME)));if($title===''||mb_strlen($title)>180){@unlink($target);throw new \InvalidArgumentException('invalid_material_title');}
+        $q=$this->pdo->prepare("INSERT INTO study_materials(user_id,subject_id,title,description,original_name,storage_name,mime_type,file_size,material_type) VALUES(?,?,?,?,?,?,?,?,?)");
+        $q->execute([$u,$this->nullableInt($b['subjectId']??null),$title,$this->limitText($b['description']??null,2000),basename((string)$file['name']),$stored,$mime,(int)$file['size'],$allowed[$mime]]);
+        return ['id'=>(int)$this->pdo->lastInsertId(),'title'=>$title,'originalName'=>basename((string)$file['name']),'mimeType'=>$mime,'size'=>(int)$file['size'],'type'=>$allowed[$mime]];
+    }
+    private function reminders(int $u): array
+    {
+        $q=$this->pdo->prepare("SELECT id,task_id,title,message,remind_at,status,created_at FROM study_reminders WHERE user_id=? ORDER BY remind_at LIMIT 200");$q->execute([$u]);return $q->fetchAll();
+    }
+    private function createReminder(int $u,array $b): array
+    {
+        $title=trim((string)($b['title']??''));if($title===''||mb_strlen($title)>180)throw new \InvalidArgumentException('invalid_reminder_title');
+        $at=$this->dateOrNull($b['remindAt']??null);if($at===null)throw new \InvalidArgumentException('remind_at_required');
+        $task=$this->nullableInt($b['taskId']??null);
+        $q=$this->pdo->prepare("INSERT INTO study_reminders(user_id,task_id,title,message,remind_at) VALUES(?,?,?,?,?)");$q->execute([$u,$task,$title,$this->limitText($b['message']??null,1000),$at]);
+        $id=(int)$this->pdo->lastInsertId();return ['id'=>$id,'title'=>$title,'remindAt'=>$at,'status'=>'pending'];
+    }
+    private function notifications(int $u): array
+    {
+        $q=$this->pdo->prepare("SELECT id,title,body,notification_type,data_json,read_at,created_at FROM study_notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 100");$q->execute([$u]);return $q->fetchAll();
+    }
+    private function markNotificationRead(int $u,int $id): void
+    {
+        $q=$this->pdo->prepare("UPDATE study_notifications SET read_at=UTC_TIMESTAMP() WHERE id=? AND user_id=?");$q->execute([$id,$u]);if(!$q->rowCount())throw new \InvalidArgumentException('notification_not_found');
     }
 
     private function subjects(): array {
