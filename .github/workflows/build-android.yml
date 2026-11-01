@@ -36,10 +36,13 @@ jobs:
         working-directory: FlutterApp
         run: flutter create --platforms=android --project-name studygo_app .
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set Android compile SDK 36
         working-directory: FlutterApp
         run: |
-          sdkmanager "platforms;android-36"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
           if [ -f android/app/build.gradle.kts ]; then
             sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
             grep -q 'compileSdk = 36' android/app/build.gradle.kts
