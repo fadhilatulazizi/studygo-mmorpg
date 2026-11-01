@@ -30,7 +30,7 @@ return [
     ],
     'uploads' => [
         'directory' => getenv('STUDYGO_UPLOAD_DIR') ?: dirname(__DIR__, 2) . '/var/private-uploads',
-        'max_bytes' => 52428800,
+        'max_bytes' => max(1048576, (int)(getenv('STUDYGO_UPLOAD_MAX_BYTES') ?: 52428800)),
     ],
     'ads' => [
         'callback_secret' => getenv('AD_REWARD_CALLBACK_SECRET') ?: '',
