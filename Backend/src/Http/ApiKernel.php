@@ -62,9 +62,19 @@ final class ApiKernel
         if (strlen($password) < 10 || strlen($password) > 200) throw new \InvalidArgumentException('password_must_be_10_to_200_characters');
         if ($name === '' || mb_strlen($name) > 80) throw new \InvalidArgumentException('invalid_display_name');
 
-        $q = $this->pdo->prepare("INSERT INTO studygo_users(email,password_hash,display_name) VALUES(?,?,?)");
-        $q->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name]);
-        $id = (int)$this->pdo->lastInsertId();
+        $this->pdo->beginTransaction();
+        try {
+            $q = $this->pdo->prepare("INSERT INTO studygo_users(email,password_hash,display_name) VALUES(?,?,?)");
+            $q->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name]);
+            $id = (int)$this->pdo->lastInsertId();
+            // Keep the MMORPG identity mapped to the shared StudyGo account.
+            $gamePlayer = $this->pdo->prepare("INSERT INTO game_players(studygo_user_id,display_name) VALUES(?,?)");
+            $gamePlayer->execute([$id, $name]);
+            $this->pdo->commit();
+        } catch (\\Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
         $this->respond(201, ['user' => ['id' => $id, 'email' => $email, 'displayName' => $name], 'message' => 'account_created_login_required']);
     }
 
