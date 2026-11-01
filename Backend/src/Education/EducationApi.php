@@ -1,0 +1,135 @@
+<?php
+declare(strict_types=1);
+
+namespace StudyGo\Education;
+
+use PDO;
+
+final class EducationApi
+{
+    public function __construct(private PDO $pdo, private array $config) {}
+
+    public function handle(string $method, string $path, array $body, int $userId): ?array
+    {
+        if ($method === 'GET' && $path === '/api/v1/subjects') return ['status'=>200,'data'=>['subjects'=>$this->subjects()]];
+        if ($method === 'GET' && $path === '/api/v1/planner/tasks') return ['status'=>200,'data'=>['tasks'=>$this->tasks($userId)]];
+        if ($method === 'POST' && $path === '/api/v1/planner/tasks') return ['status'=>201,'data'=>['task'=>$this->createTask($userId,$body)]];
+        if (preg_match('#^/api/v1/planner/tasks/(\d+)$#',$path,$m)) {
+            if ($method === 'PATCH') return ['status'=>200,'data'=>['task'=>$this->updateTask($userId,(int)$m[1],$body)]];
+            if ($method === 'DELETE') { $this->deleteTask($userId,(int)$m[1]); return ['status'=>200,'data'=>['deleted'=>true]]; }
+        }
+        if ($method === 'GET' && $path === '/api/v1/notes') return ['status'=>200,'data'=>['notes'=>$this->notes($userId)]];
+        if ($method === 'POST' && $path === '/api/v1/notes') return ['status'=>201,'data'=>['note'=>$this->createNote($userId,$body)]];
+        if (preg_match('#^/api/v1/notes/(\d+)$#',$path,$m)) {
+            if ($method === 'PATCH') return ['status'=>200,'data'=>['note'=>$this->updateNote($userId,(int)$m[1],$body)]];
+            if ($method === 'DELETE') { $this->deleteNote($userId,(int)$m[1]); return ['status'=>200,'data'=>['deleted'=>true]]; }
+        }
+        if ($method === 'GET' && $path === '/api/v1/ai/quota') return ['status'=>200,'data'=>$this->quota($userId)];
+        if ($method === 'POST' && $path === '/api/v1/ai/tutor') return ['status'=>200,'data'=>['answer'=>$this->askTutor($userId,$body)]];
+        return null;
+    }
+
+    public function rewardCallback(array $b, string $signature): array
+    {
+        $secret=(string)($this->config['ads']['callback_secret']??'');
+        if (strlen($secret)<32 || $signature==='') throw new \RuntimeException('reward_callback_not_configured');
+        $raw=json_encode($b,JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
+        $expected=hash_hmac('sha256',$raw,$secret);
+        if (!hash_equals($expected,$signature)) throw new \RuntimeException('invalid_reward_signature');
+        $userId=(int)($b['userId']??0); $transactionId=trim((string)($b['transactionId']??'')); $provider=(string)($b['provider']??'admob');
+        if($userId<=0 || $transactionId==='' || strlen($transactionId)>190) throw new \InvalidArgumentException('invalid_reward_payload');
+        $this->pdo->beginTransaction();
+        try {
+            $q=$this->pdo->prepare("SELECT questions_used,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE() FOR UPDATE");
+            $q->execute([$userId]); $row=$q->fetch();
+            if(!$row) { $this->pdo->prepare("INSERT INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,UTC_DATE())")->execute([$userId]); $row=['questions_used'=>0,'reward_ads_used'=>0]; }
+            if((int)$row['reward_ads_used']>=3) throw new \DomainException('daily_reward_limit_reached');
+            $ins=$this->pdo->prepare("INSERT INTO study_ad_reward_events(provider,transaction_id,user_id,reward_amount) VALUES(?,?,?,3)");
+            $ins->execute([$provider,$transactionId,$userId]);
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET rewarded_questions=rewarded_questions+3,reward_ads_used=reward_ads_used+1 WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$userId]);
+            $this->pdo->commit();
+            return $this->quota($userId);
+        } catch (\Throwable $e) { if($this->pdo->inTransaction()) $this->pdo->rollBack(); throw $e; }
+    }
+
+    private function subjects(): array {
+        return $this->pdo->query("SELECT id,code,name,description,icon FROM study_subjects WHERE is_active=1 ORDER BY sort_order,name")->fetchAll();
+    }
+    private function tasks(int $u): array {
+        $q=$this->pdo->prepare("SELECT id,subject_id,title,description,due_at,priority,status,reminder_at,created_at,updated_at FROM study_tasks WHERE user_id=? ORDER BY (due_at IS NULL),due_at LIMIT 200");
+        $q->execute([$u]); return $q->fetchAll();
+    }
+    private function createTask(int $u,array $b): array {
+        $title=trim((string)($b['title']??'')); if($title===''||mb_strlen($title)>180) throw new \InvalidArgumentException('invalid_title');
+        $subject=$this->nullableInt($b['subjectId']??null); $due=$this->dateOrNull($b['dueAt']??null); $rem=$this->dateOrNull($b['reminderAt']??null);
+        $priority=$this->enum($b['priority']??'normal',['low','normal','high']); $status=$this->enum($b['status']??'todo',['todo','in_progress','done','cancelled']);
+        $q=$this->pdo->prepare("INSERT INTO study_tasks(user_id,subject_id,title,description,due_at,priority,status,reminder_at) VALUES(?,?,?,?,?,?,?,?)");
+        $q->execute([$u,$subject,$title,$this->limitText($b['description']??null,10000),$due,$priority,$status,$rem]);
+        return $this->getTask($u,(int)$this->pdo->lastInsertId());
+    }
+    private function updateTask(int $u,int $id,array $b): array {
+        $current=$this->getTask($u,$id);
+        $title=trim((string)($b['title']??$current['title'])); if($title===''||mb_strlen($title)>180) throw new \InvalidArgumentException('invalid_title');
+        $status=$this->enum($b['status']??$current['status'],['todo','in_progress','done','cancelled']);
+        $priority=$this->enum($b['priority']??$current['priority'],['low','normal','high']);
+        $desc=array_key_exists('description',$b)?$this->limitText($b['description'],10000):$current['description'];
+        $due=array_key_exists('dueAt',$b)?$this->dateOrNull($b['dueAt']):$current['due_at'];
+        $sub=array_key_exists('subjectId',$b)?$this->nullableInt($b['subjectId']):$current['subject_id'];
+        $rem=array_key_exists('reminderAt',$b)?$this->dateOrNull($b['reminderAt']):$current['reminder_at'];
+        $q=$this->pdo->prepare("UPDATE study_tasks SET title=?,description=?,due_at=?,priority=?,status=?,subject_id=?,reminder_at=? WHERE id=? AND user_id=?");
+        $q->execute([$title,$desc,$due,$priority,$status,$sub,$rem,$id,$u]); return $this->getTask($u,$id);
+    }
+    private function getTask(int $u,int $id): array { $q=$this->pdo->prepare("SELECT id,subject_id,title,description,due_at,priority,status,reminder_at,created_at,updated_at FROM study_tasks WHERE id=? AND user_id=?");$q->execute([$id,$u]);$r=$q->fetch();if(!$r)throw new \InvalidArgumentException('task_not_found');return $r; }
+    private function deleteTask(int $u,int $id): void {$q=$this->pdo->prepare("DELETE FROM study_tasks WHERE id=? AND user_id=?");$q->execute([$id,$u]);if(!$q->rowCount())throw new \InvalidArgumentException('task_not_found');}
+    private function notes(int $u): array {$q=$this->pdo->prepare("SELECT id,subject_id,title,content,created_at,updated_at FROM study_notes WHERE user_id=? ORDER BY updated_at DESC LIMIT 200");$q->execute([$u]);return $q->fetchAll();}
+    private function createNote(int $u,array $b): array {$title=trim((string)($b['title']??''));$content=(string)($b['content']??'');if($title===''||mb_strlen($title)>180||$content===''||mb_strlen($content)>100000)throw new \InvalidArgumentException('invalid_note');$q=$this->pdo->prepare("INSERT INTO study_notes(user_id,subject_id,title,content) VALUES(?,?,?,?)");$q->execute([$u,$this->nullableInt($b['subjectId']??null),$title,$content]);return $this->getNote($u,(int)$this->pdo->lastInsertId());}
+    private function updateNote(int $u,int $id,array $b): array {$old=$this->getNote($u,$id);$title=trim((string)($b['title']??$old['title']));$content=(string)($b['content']??$old['content']);if($title===''||mb_strlen($title)>180||$content===''||mb_strlen($content)>100000)throw new \InvalidArgumentException('invalid_note');$sub=array_key_exists('subjectId',$b)?$this->nullableInt($b['subjectId']):$old['subject_id'];$q=$this->pdo->prepare("UPDATE study_notes SET title=?,content=?,subject_id=? WHERE id=? AND user_id=?");$q->execute([$title,$content,$sub,$id,$u]);return $this->getNote($u,$id);}
+    private function getNote(int $u,int $id): array {$q=$this->pdo->prepare("SELECT id,subject_id,title,content,created_at,updated_at FROM study_notes WHERE id=? AND user_id=?");$q->execute([$id,$u]);$r=$q->fetch();if(!$r)throw new \InvalidArgumentException('note_not_found');return $r;}
+    private function deleteNote(int $u,int $id): void {$q=$this->pdo->prepare("DELETE FROM study_notes WHERE id=? AND user_id=?");$q->execute([$id,$u]);if(!$q->rowCount())throw new \InvalidArgumentException('note_not_found');}
+    private function quota(int $u): array {$q=$this->pdo->prepare("SELECT questions_used,rewarded_questions,reward_ads_used FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE()");$q->execute([$u]);$r=$q->fetch()?:['questions_used'=>0,'rewarded_questions'=>0,'reward_ads_used'=>0];$limit=5+(int)$r['rewarded_questions'];return ['date'=>gmdate('Y-m-d'),'timezone'=>'UTC','freeLimit'=>5,'bonusQuestions'=>(int)$r['rewarded_questions'],'rewardAdsUsed'=>(int)$r['reward_ads_used'],'rewardAdsRemaining'=>max(0,3-(int)$r['reward_ads_used']),'questionsUsed'=>(int)$r['questions_used'],'questionsRemaining'=>max(0,$limit-(int)$r['questions_used']),'dailyMaximum'=>14];}
+
+    private function askTutor(int $u,array $b): string {
+        $prompt=trim((string)($b['question']??''));if($prompt===''||mb_strlen($prompt)>12000)throw new \InvalidArgumentException('invalid_question');
+        $requestId=(string)($b['requestId']??'');if(!preg_match('/^[0-9a-fA-F-]{36}$/',$requestId))throw new \InvalidArgumentException('valid_request_id_required');
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare("INSERT IGNORE INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,UTC_DATE())")->execute([$u]);
+            $q=$this->pdo->prepare("SELECT questions_used,rewarded_questions FROM study_ai_daily_usage WHERE user_id=? AND usage_date=UTC_DATE() FOR UPDATE");$q->execute([$u]);$usage=$q->fetch();
+            if((int)$usage['questions_used'] >= 5+(int)$usage['rewarded_questions'])throw new \DomainException('daily_ai_quota_exceeded');
+            $dup=$this->pdo->prepare("SELECT id FROM study_ai_requests WHERE user_id=? AND request_id=?");$dup->execute([$u,$requestId]);if($dup->fetch())throw new \DomainException('duplicate_request_id');
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=questions_used+1 WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$u]);
+            $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
+            $this->pdo->prepare("INSERT INTO study_ai_requests(user_id,request_id,provider,model,prompt_hash) VALUES(?,?,?,?,?)")->execute([$u,$requestId,$provider,$model,hash('sha256',$prompt)]);
+            $this->pdo->commit();
+        } catch (\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        try { return $this->callProvider($prompt); }
+        catch (\Throwable $e) {
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=GREATEST(questions_used-1,0) WHERE user_id=? AND usage_date=UTC_DATE()")->execute([$u]);
+            $this->pdo->prepare("DELETE FROM study_ai_requests WHERE user_id=? AND request_id=?")->execute([$u,$requestId]);
+            throw $e;
+        }
+    }
+    private function callProvider(string $prompt): string {
+        if(!function_exists('curl_init'))throw new \RuntimeException('php_curl_extension_required');
+        $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
+        if($provider==='openai') {
+            $key=(string)($this->config['ai']['openai_api_key']??'');if($key==='')throw new \RuntimeException('ai_provider_not_configured');
+            $url='https://api.openai.com/v1/responses';$payload=['model'=>$model,'input'=>[['role'=>'system','content'=>'Anda adalah StudyGo AI, tutor pendidikan yang ramah, akurat, dan menjelaskan langkah demi langkah sesuai tingkat pelajar. Jika tidak yakin, katakan.'],['role'=>'user','content'=>$prompt]]];
+            $headers=['Authorization: Bearer '.$key,'Content-Type: application/json'];
+        } else {
+            $key=(string)($this->config['ai']['gemini_api_key']??'');if($key==='')throw new \RuntimeException('ai_provider_not_configured');
+            $url='https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent?key='.rawurlencode($key);
+            $payload=['systemInstruction'=>['parts'=>[['text'=>'Anda adalah StudyGo AI, tutor pendidikan yang ramah, akurat, dan menjelaskan langkah demi langkah sesuai tingkat pelajar. Jika tidak yakin, katakan.']]],'contents'=>[['role'=>'user','parts'=>[['text'=>$prompt]]]],'generationConfig'=>['temperature'=>0.4,'maxOutputTokens'=>2048]];
+            $headers=['Content-Type: application/json'];
+        }
+        $ch=curl_init($url);curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>json_encode($payload,JSON_THROW_ON_ERROR),CURLOPT_CONNECTTIMEOUT=>10,CURLOPT_TIMEOUT=>45]);
+        $raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);
+        if($raw===false||$code<200||$code>=300){error_log('StudyGo AI provider error HTTP '.$code.' '.$err);throw new \RuntimeException('ai_service_unavailable');}
+        $data=json_decode($raw,true);$text=$provider==='openai'?($data['output'][0]['content'][0]['text']??null):($data['candidates'][0]['content']['parts'][0]['text']??null);
+        if(!is_string($text)||$text==='')throw new \RuntimeException('ai_empty_response');return $text;
+    }
+    private function nullableInt(mixed $v): ?int {if($v===null||$v==='')return null;$n=filter_var($v,FILTER_VALIDATE_INT);if($n===false||$n<=0)throw new \InvalidArgumentException('invalid_subject_id');return $n;}
+    private function dateOrNull(mixed $v): ?string {if($v===null||$v==='')return null;try{$d=new \DateTimeImmutable((string)$v,new \DateTimeZone('UTC'));return $d->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');}catch(\Throwable){throw new \InvalidArgumentException('invalid_datetime');}}
+    private function enum(mixed $v,array $allowed): string {$s=(string)$v;if(!in_array($s,$allowed,true))throw new \InvalidArgumentException('invalid_enum_value');return $s;}
+    private function limitText(mixed $v,int $max): ?string {if($v===null)return null;$s=trim((string)$v);if(mb_strlen($s)>$max)throw new \InvalidArgumentException('text_too_long');return $s;}
+}
