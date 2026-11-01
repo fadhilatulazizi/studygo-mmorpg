@@ -263,7 +263,8 @@ final class ApiKernel
         $result['rewardAmount']=(int)($result['rewardAmount']?:3);
         $this->respond(200,['ads'=>$result]);
     }
-\n    private function jsonBody(): array
+
+    private function jsonBody(): array
     {
         $raw=file_get_contents('php://input')?:'';if($raw==='')return [];
         $v=json_decode($raw,true);if(!is_array($v))throw new \InvalidArgumentException('invalid_json_body');return $v;
