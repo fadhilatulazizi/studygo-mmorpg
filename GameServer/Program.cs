@@ -20,6 +20,7 @@ if (!string.IsNullOrWhiteSpace(gameDatabase))
 }
 
 var app = builder.Build();
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -190,7 +191,6 @@ app.Map("/ws", async context =>
     }
 });
 
-app.UseWebSockets();
 app.Run();
 
 public sealed record SendMarchRequest(string? RequestId, string? DestinationObjectId, string? MissionType, List<SendMarchTroop>? Troops);
