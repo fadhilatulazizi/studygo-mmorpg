@@ -160,7 +160,7 @@ final class ApiKernel
             $this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP(),last_used_at=UTC_TIMESTAMP() WHERE id=?")->execute([$row['id']]);
             $this->pdo->commit();
             $this->issueSession((int)$row['user_id'],['id'=>(int)$row['uid'],'email'=>$row['email'],'displayName'=>$row['display_name']],(string)$row['session_id']);
-        } catch(\\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        } catch(\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
     }
 
     private function logout(array $b): void
