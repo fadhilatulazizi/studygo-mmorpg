@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StudyGo Admin - AdMob</title>
+<style>
+body{font:15px system-ui;background:#f3f5f7;color:#17212b;margin:0;padding:24px}main{max-width:820px;margin:auto;background:#fff;padding:24px;border-radius:14px;box-shadow:0 4px 24px #10203012}h1{margin-top:0}label{display:block;font-weight:600;margin:14px 0 5px}input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #ccd4dc;border-radius:8px}fieldset{border:1px solid #dbe1e7;border-radius:10px;margin:18px 0;padding:14px}button{padding:11px 18px;border:0;border-radius:8px;background:#0d9488;color:white;font-weight:700;cursor:pointer}button.secondary{background:#475569}small{color:#64748b}.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:600px){.row{grid-template-columns:1fr}}#status{margin:14px 0;padding:10px;border-radius:8px;background:#eef2f6;white-space:pre-wrap}
+</style></head><body><main><h1>Pengaturan AdMob StudyGo</h1><p>Masuk menggunakan access token akun admin StudyGo. ID aplikasi dan unit iklan bukan rahasia; jangan masukkan API key Google di sini.</p>
+<label>API Base URL</label><input id="api" placeholder="https://api.studygo.id"><label>Access Token Admin</label><input id="token" type="password" autocomplete="off" placeholder="Bearer token (tanpa kata Bearer)">
+<div id="status">Belum terhubung.</div>
+<fieldset><legend>App ID</legend><div class="row"><div><label>Android App ID</label><input id="androidAppId"></div><div><label>iOS App ID</label><input id="iosAppId"></div></div></fieldset>
+<fieldset><legend>Banner Ad Unit ID</legend><div class="row"><div><label>Android</label><input id="androidBannerUnitId"></div><div><label>iOS</label><input id="iosBannerUnitId"></div></div></fieldset>
+<fieldset><legend>Rewarded Ad Unit ID</legend><div class="row"><div><label>Android</label><input id="androidRewardedUnitId"></div><div><label>iOS</label><input id="iosRewardedUnitId"></div></div></fieldset>
+<fieldset><legend>Interstitial Ad Unit ID</legend><div class="row"><div><label>Android</label><input id="androidInterstitialUnitId"></div><div><label>iOS</label><input id="iosInterstitialUnitId"></div></div></fieldset>
+<fieldset><legend>Reward dan SSV</legend><label>Reward item</label><input id="rewardItem" value="studygo_questions"><label>Jumlah pertanyaan bonus per iklan</label><input id="rewardAmount" type="number" min="1" max="100" value="3"><label><input id="ssvEnabled" type="checkbox" style="width:auto"> Aktifkan verifikasi AdMob SSV</label><small>Aktifkan setelah URL callback dipasang di AdMob dan unit Rewarded sudah diisi.</small></fieldset>
+<button id="load">Muat pengaturan</button> <button id="save" class="secondary">Simpan pengaturan</button>
+<script>
+const fields=['androidAppId','iosAppId','androidBannerUnitId','iosBannerUnitId','androidRewardedUnitId','iosRewardedUnitId','androidInterstitialUnitId','iosInterstitialUnitId','rewardItem','rewardAmount','ssvEnabled'];
+const statusEl=document.getElementById('status');
+function apiUrl(){return document.getElementById('api').value.replace(/\/$/,'')+'/api/v1/admin/ads'}
+function headers(){return {'Authorization':'Bearer '+document.getElementById('token').value.trim(),'Content-Type':'application/json'}}
+async function load(){try{const r=await fetch(apiUrl(),{headers:headers()});const j=await r.json();if(!r.ok)throw Error(j.error||r.status);for(const k of fields){const e=document.getElementById(k);if(k==='ssvEnabled')e.checked=!!j.ads[k];else e.value=j.ads[k]??'';}statusEl.textContent='Pengaturan berhasil dimuat.'}catch(e){statusEl.textContent='Gagal memuat: '+e.message}}
+async function save(){try{const data={};for(const k of fields){const e=document.getElementById(k);data[k]=k==='ssvEnabled'?e.checked:e.value;}const r=await fetch(apiUrl(),{method:'PUT',headers:headers(),body:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||r.status);statusEl.textContent='Pengaturan berhasil disimpan.'}catch(e){statusEl.textContent='Gagal menyimpan: '+e.message}}
+document.getElementById('load').onclick=load;document.getElementById('save').onclick=save;
+</script></main></body></html>
