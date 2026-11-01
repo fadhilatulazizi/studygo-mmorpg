@@ -41,24 +41,52 @@ jobs:
         working-directory: FlutterApp
         run: flutter create --platforms=android --project-name studygo_app .
 
-      - name: Set Android compile SDK 36
-        working-directory: FlutterApp
-        run: |
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
-            grep -q 'compileSdk = 36' android/app/build.gradle.kts
-          elif [ -f android/app/build.gradle ]; then
-            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
-            sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 36/' android/app/build.gradle
-            grep -Eq 'compileSdk(Version)? 36' android/app/build.gradle
-          else
-            echo "Android app Gradle file not found" >&2
-            exit 1
-          fi
-
       - name: Install dependencies
         working-directory: FlutterApp
         run: flutter pub get
+
+      - name: Force Android compile SDK 36 for app and plugins
+        working-directory: FlutterApp
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          app_files = [
+              Path("android/app/build.gradle"),
+              Path("android/app/build.gradle.kts"),
+          ]
+          app_file = next((p for p in app_files if p.is_file()), None)
+          if app_file is None:
+              raise SystemExit("Android app Gradle file not found")
+
+          gradle_files = [app_file]
+          pub_cache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
+          if pub_cache.exists():
+              gradle_files.extend(pub_cache.glob("*/android/build.gradle"))
+              gradle_files.extend(pub_cache.glob("*/android/build.gradle.kts"))
+
+          pattern = re.compile(
+              r"(?m)^(\\s*compileSdk(?:Version)?\\s*=?\\s*)"
+              r"(?:flutter\\.compileSdkVersion|\\d+)(\\s*(?://.*)?)$"
+          )
+          changed = []
+          for gradle_file in gradle_files:
+              original = gradle_file.read_text()
+              updated, count = pattern.subn(r"\\g<1>36\\g<2>", original)
+              if count:
+                  gradle_file.write_text(updated)
+                  changed.append(str(gradle_file))
+
+          app_text = app_file.read_text()
+          if not re.search(r"(?m)^\\s*compileSdk(?:Version)?\\s*=?\\s*36\\s*$", app_text):
+              raise SystemExit(f"Failed to set app compileSdk to 36 in {app_file}")
+
+          print(f"Set compileSdk 36 in {len(changed)} Gradle files:")
+          for name in changed:
+              print(f" - {name}")
+          PY
 
       - name: Analyze Dart source
         working-directory: FlutterApp
