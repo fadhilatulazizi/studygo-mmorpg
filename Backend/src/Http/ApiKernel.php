@@ -184,9 +184,11 @@ final class ApiKernel
     {
         $header=$_SERVER['HTTP_AUTHORIZATION']??'';
         if(!preg_match('/^Bearer\s+([A-Za-z0-9_-]{40,100})$/i',$header,$m)){$this->respond(401,['error'=>'unauthorized']);exit;}
-        $q=$this->pdo->prepare("SELECT u.id,u.email,u.display_name FROM studygo_refresh_tokens t JOIN studygo_users u ON u.id=t.user_id WHERE t.token_hash=? AND t.token_type='access' AND t.revoked_at IS NULL AND t.expires_at>UTC_TIMESTAMP() AND u.account_status='active' LIMIT 1");
+        $q=$this->pdo->prepare("SELECT t.id AS token_id,u.id,u.email,u.display_name FROM studygo_refresh_tokens t JOIN studygo_users u ON u.id=t.user_id WHERE t.token_hash=? AND t.token_type='access' AND t.revoked_at IS NULL AND t.expires_at>UTC_TIMESTAMP() AND u.account_status='active' LIMIT 1");
         $q->execute([hash('sha256',$m[1])]);$u=$q->fetch();
-        if(!$u){$this->respond(401,['error'=>'invalid_or_expired_token']);exit;}return $u;
+        if(!$u){$this->respond(401,['error'=>'invalid_or_expired_token']);exit;}
+        $this->pdo->prepare("UPDATE studygo_refresh_tokens SET last_used_at=UTC_TIMESTAMP() WHERE id=?")->execute([$u['token_id']]);
+        return $u;
     }
 
     private function gameToken(array $b): void
