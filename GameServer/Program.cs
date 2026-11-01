@@ -8,8 +8,10 @@ if (!string.IsNullOrWhiteSpace(gameDatabase))
 {
     builder.Services.AddSingleton(new MySqlWorldSpawnRepository(gameDatabase));
     builder.Services.AddSingleton(new MySqlMarchRepository(gameDatabase));
+    builder.Services.AddSingleton(new MySqlMarchSettlementRepository(gameDatabase));
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.WorldSpawnWorker>();
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.MarchArrivalWorker>();
+    builder.Services.AddHostedService<StudyGo.GameServer.Workers.MarchSettlementWorker>();
 }
 
 var app = builder.Build();
@@ -25,7 +27,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     ok = true,
     service = "studygo-game-server",
-    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-spawn-and-march-workers"
+    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-spawn-march-and-settlement-workers"
 }));
 
 app.MapGet("/world/region", (string serverId, int regionX, int regionY) =>
