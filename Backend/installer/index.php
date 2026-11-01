@@ -61,7 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($host === '' || $name === '' || $user === '') $errors[] = 'Host, nama database, dan user database wajib diisi.';
         if (!preg_match('/^[A-Za-z0-9_$-]{1,64}$/', $name) || !preg_match('/^[A-Za-z0-9_$-]{1,64}$/', $user)) $errors[] = 'Format nama database/user tidak valid.';
         if (!in_array($aiProvider, ['gemini', 'openai'], true)) $errors[] = 'Provider AI tidak valid.';
-        if ($aiProvider !== '' && $aiKey === '') $errors[] = 'API key AI diperlukan untuk mengaktifkan layanan AI. Anda dapat mengisi placeholder dahulu dan mengaturnya nanti di config.';
         if ($uploadDir === '' || str_starts_with($uploadDir, rtrim($_SERVER['DOCUMENT_ROOT'] ?? '', '/') . '/')) $errors[] = 'Folder upload harus berada di luar document root.';
         if (!$errors) {
             mysqli_report(MYSQLI_REPORT_OFF);
