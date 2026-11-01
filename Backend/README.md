@@ -10,8 +10,9 @@ Initial backend foundation for shared StudyGo accounts and MMORPG authentication
 ## Setup
 1. Create a database and a dedicated database user with least-privilege permissions.
 2. Import migrations in order:
-   - `database/migrations/000_studygo_auth.sql` (after `001_world_map.sql` because server membership references `game_servers`)
-   - `database/schema.sql`
+   - `database/migrations/001_world_map.sql`
+   - `database/schema.sql` (creates `game_players`)
+   - `database/migrations/000_studygo_auth.sql` (creates StudyGo accounts and server membership)
    - Remaining game migrations in numeric order.
 3. Copy `config/config.example.php` to `config/config.php`; set DB and JWT secrets through server environment variables. Do not commit `config.php`.
 4. Point the web document root to `Backend/public`. If cPanel cannot set a document root, use a public front-controller directory and keep config/src/database outside public_html.
