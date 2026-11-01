@@ -358,6 +358,7 @@ final class ApiKernel
 
     private function jsonBody(): array
     {
+        $contentType=strtolower((string)($_SERVER['CONTENT_TYPE']??''));if(str_starts_with($contentType,'multipart/form-data'))return []; 
         $raw=file_get_contents('php://input')?:'';if($raw==='')return [];
         $v=json_decode($raw,true);if(!is_array($v))throw new \InvalidArgumentException('invalid_json_body');return $v;
     }
