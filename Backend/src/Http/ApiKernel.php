@@ -36,6 +36,8 @@ final class ApiKernel
             }
             if ($method === 'POST' && $path === '/api/v1/auth/register') { $this->register($body); return; }
             if ($method === 'POST' && $path === '/api/v1/auth/login') { $this->login($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/refresh') { $this->refresh($body); return; }
+            if ($method === 'POST' && $path === '/api/v1/auth/logout') { $this->logout($body); return; }
             if ($method === 'GET' && $path === '/api/v1/auth/me') {
                 $u=$this->authenticatedUser();
                 $this->respond(200,['user'=>['id'=>(int)$u['id'],'email'=>$u['email'],'displayName'=>$u['display_name']]]);
@@ -87,18 +89,73 @@ final class ApiKernel
 
     private function login(array $b): void
     {
-        $email=strtolower(trim((string)($b['email']??'')));$password=(string)($b['password']??'');
+        $email=strtolower(trim((string)($b['email']??'')));
+        $password=(string)($b['password']??'');
+        if(!filter_var($email,FILTER_VALIDATE_EMAIL)||strlen($email)>190||$password==='') {
+            $this->respond(401,['error'=>'invalid_credentials']); return;
+        }
+        $ip=(string)($_SERVER['REMOTE_ADDR']??'unknown');
+        $identity=hash('sha256',$email.'|'.$ip);
+        $th=$this->pdo->prepare("SELECT failed_attempts,window_started_at,locked_until FROM studygo_login_throttles WHERE identity_hash=?");
+        $th->execute([$identity]); $state=$th->fetch();
+        if($state && $state['locked_until']!==null && strtotime($state['locked_until'].' UTC')>time()) {
+            header('Retry-After: '.max(1,strtotime($state['locked_until'].' UTC')-time()));
+            $this->respond(429,['error'=>'too_many_login_attempts']); return;
+        }
         $q=$this->pdo->prepare("SELECT id,email,password_hash,display_name,account_status FROM studygo_users WHERE email=? LIMIT 1");
         $q->execute([$email]);$user=$q->fetch();
-        if(!$user||!password_verify($password,$user['password_hash'])){$this->respond(401,['error'=>'invalid_credentials']);return;}
+        if(!$user||!password_verify($password,$user['password_hash'])) {
+            $now=time(); $windowStart=$state?strtotime($state['window_started_at'].' UTC'):0;
+            $count=($state && $now-$windowStart<900)?(int)$state['failed_attempts']+1:1;
+            $locked=$count>=5?gmdate('Y-m-d H:i:s',$now+900):null;
+            $this->pdo->prepare("INSERT INTO studygo_login_throttles(identity_hash,failed_attempts,window_started_at,locked_until) VALUES(?,?,UTC_TIMESTAMP(),?) ON DUPLICATE KEY UPDATE failed_attempts=VALUES(failed_attempts),window_started_at=VALUES(window_started_at),locked_until=VALUES(locked_until)")
+                ->execute([$identity,$count,$locked]);
+            if($locked!==null){header('Retry-After: 900');$this->respond(429,['error'=>'too_many_login_attempts']);return;}
+            $this->respond(401,['error'=>'invalid_credentials']);return;
+        }
         if($user['account_status']!=='active'){$this->respond(403,['error'=>'account_not_active']);return;}
-        if(password_needs_rehash($user['password_hash'],PASSWORD_DEFAULT))$this->pdo->prepare("UPDATE studygo_users SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$user['id']]);
+        $this->pdo->prepare("DELETE FROM studygo_login_throttles WHERE identity_hash=?")->execute([$identity]);
+        if(password_needs_rehash($user['password_hash'],PASSWORD_DEFAULT))
+            $this->pdo->prepare("UPDATE studygo_users SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$user['id']]);
         $this->pdo->prepare("UPDATE studygo_users SET last_login_at=UTC_TIMESTAMP() WHERE id=?")->execute([$user['id']]);
+        $this->issueSession((int)$user['id'],['id'=>(int)$user['id'],'email'=>$user['email'],'displayName'=>$user['display_name']]);
+    }
+
+    private function issueSession(int $userId,array $user): void
+    {
         $access=$this->randomToken(32);$refresh=$this->randomToken(48);
         $days=max(1,min(90,(int)($this->config['auth']['refresh_ttl_days']??30)));
-        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,expires_at) VALUES(?,?,'access',DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))")->execute([$user['id'],hash('sha256',$access)]);
-        $this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,expires_at) VALUES(?,?,'refresh',DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))")->execute([$user['id'],hash('sha256',$refresh)]);
-        $this->respond(200,['user'=>['id'=>(int)$user['id'],'email'=>$user['email'],'displayName'=>$user['display_name']],'accessToken'=>$access,'tokenType'=>'Bearer','expiresIn'=>900,'refreshToken'=>$refresh]);
+        $device=mb_substr(trim((string)($_SERVER['HTTP_X_DEVICE_LABEL']??'')),0,100);
+        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,expires_at) VALUES(?,?,'access',?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))");
+        $ins->execute([$userId,hash('sha256',$access),$device?:null]);
+        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,expires_at) VALUES(?,?,'refresh',?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))");
+        $ins->execute([$userId,hash('sha256',$refresh),$device?:null]);
+        $this->respond(200,['user'=>$user,'accessToken'=>$access,'tokenType'=>'Bearer','expiresIn'=>900,'refreshToken'=>$refresh,'refreshExpiresIn'=>$days*86400]);
+    }
+
+    private function refresh(array $b): void
+    {
+        $token=(string)($b['refreshToken']??'');
+        if(!preg_match('/^[A-Za-z0-9_-]{60,100}$/',$token)){$this->respond(401,['error'=>'invalid_refresh_token']);return;}
+        $this->pdo->beginTransaction();
+        try {
+            $q=$this->pdo->prepare("SELECT t.id,t.user_id,t.device_label,u.id AS uid,u.email,u.display_name,u.account_status FROM studygo_refresh_tokens t JOIN studygo_users u ON u.id=t.user_id WHERE t.token_hash=? AND t.token_type='refresh' AND t.revoked_at IS NULL AND t.expires_at>UTC_TIMESTAMP() FOR UPDATE");
+            $q->execute([hash('sha256',$token)]);$row=$q->fetch();
+            if(!$row||$row['account_status']!=='active'){$this->pdo->rollBack();$this->respond(401,['error'=>'invalid_refresh_token']);return;}
+            $this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP(),last_used_at=UTC_TIMESTAMP() WHERE id=?")->execute([$row['id']]);
+            $this->pdo->commit();
+            $this->issueSession((int)$row['user_id'],['id'=>(int)$row['uid'],'email'=>$row['email'],'displayName'=>$row['display_name']]);
+        } catch(\\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+    }
+
+    private function logout(array $b): void
+    {
+        $header=$_SERVER['HTTP_AUTHORIZATION']??'';
+        $access=preg_match('/^Bearer\\s+([A-Za-z0-9_-]{40,100})$/i',$header,$m)?$m[1]:'';
+        $refresh=(string)($b['refreshToken']??'');
+        if($access!=='')$this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE token_hash=? AND token_type='access' AND revoked_at IS NULL")->execute([hash('sha256',$access)]);
+        if(preg_match('/^[A-Za-z0-9_-]{60,100}$/',$refresh))$this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE token_hash=? AND token_type='refresh' AND revoked_at IS NULL")->execute([hash('sha256',$refresh)]);
+        $this->respond(200,['loggedOut'=>true]);
     }
 
     private function authenticatedUser(): array
