@@ -94,7 +94,8 @@ final class ApiKernel
             $this->pdo->prepare("INSERT INTO game_players(studygo_user_id,display_name) VALUES(?,?)")->execute([$id,$name]);
             $this->pdo->commit();
         }catch(\Throwable $e){if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
-        $this->respond(201,['user'=>['id'=>$id,'email'=>$email,'displayName'=>$name],'message'=>'account_created_login_required']);
+        $mailSent=$this->sendAccountToken($id,$email,'verify_email');
+        $this->respond(201,['user'=>['id'=>$id,'email'=>$email,'displayName'=>$name],'message'=>$mailSent?'verification_email_sent':'account_created_email_delivery_not_configured']);
     }
 
     private function login(array $b): void
@@ -112,7 +113,7 @@ final class ApiKernel
             header('Retry-After: '.max(1,strtotime($state['locked_until'].' UTC')-time()));
             $this->respond(429,['error'=>'too_many_login_attempts']); return;
         }
-        $q=$this->pdo->prepare("SELECT id,email,password_hash,display_name,account_status FROM studygo_users WHERE email=? LIMIT 1");
+        $q=$this->pdo->prepare("SELECT id,email,password_hash,display_name,account_status,email_verified_at FROM studygo_users WHERE email=? LIMIT 1");
         $q->execute([$email]);$user=$q->fetch();
         if(!$user||!password_verify($password,$user['password_hash'])) {
             $now=time(); $windowStart=$state?strtotime($state['window_started_at'].' UTC'):0;
@@ -124,6 +125,7 @@ final class ApiKernel
             $this->respond(401,['error'=>'invalid_credentials']);return;
         }
         if($user['account_status']!=='active'){$this->respond(403,['error'=>'account_not_active']);return;}
+        if(($this->config['auth']['require_email_verification']??false) && $user['email_verified_at']===null){$this->respond(403,['error'=>'email_verification_required']);return;}
         $this->pdo->prepare("DELETE FROM studygo_login_throttles WHERE identity_hash=?")->execute([$identity]);
         if(password_needs_rehash($user['password_hash'],PASSWORD_DEFAULT))
             $this->pdo->prepare("UPDATE studygo_users SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$user['id']]);
