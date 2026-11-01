@@ -6,7 +6,8 @@ using System.Security.Claims;
 var builder = WebApplication.CreateBuilder(args);
 
 var gameDatabase = builder.Configuration.GetConnectionString("GameDatabase");
-var gameApiEnabled = builder.Services.AddGameJwtAuthentication(builder.Configuration);
+var jwtConfigured = builder.Services.AddGameJwtAuthentication(builder.Configuration);
+var gameApiEnabled = jwtConfigured && !string.IsNullOrWhiteSpace(gameDatabase);
 if (!string.IsNullOrWhiteSpace(gameDatabase))
 {
     builder.Services.AddSingleton(new MySqlWorldSpawnRepository(gameDatabase));
@@ -90,6 +91,8 @@ app.MapGet("/world/search", (
 });
 
 
+if (gameApiEnabled)
+{
 var marchApi = app.MapGroup("/api/game").RequireAuthorization();
 
 marchApi.MapPost("/marches", async (
@@ -152,6 +155,8 @@ marchApi.MapGet("/marches/{marchId}/scout-report", async (
     return report is null ? Results.NotFound(new { error = "scout_report_not_found_or_expired" })
         : Results.Content(report, "application/json");
 });
+
+}
 
 app.Map("/ws", async context =>
 {
