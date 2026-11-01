@@ -28,6 +28,10 @@ return [
         'gemini_api_key' => getenv('GEMINI_API_KEY') ?: '',
         'openai_api_key' => getenv('OPENAI_API_KEY') ?: '',
     ],
+    'uploads' => [
+        'directory' => getenv('STUDYGO_UPLOAD_DIR') ?: dirname(__DIR__, 2) . '/var/private-uploads',
+        'max_bytes' => 52428800,
+    ],
     'ads' => [
         'callback_secret' => getenv('AD_REWARD_CALLBACK_SECRET') ?: '',
     ],
