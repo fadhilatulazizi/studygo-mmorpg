@@ -13,7 +13,9 @@ Initial backend foundation for shared StudyGo accounts and MMORPG authentication
    - `database/migrations/001_world_map.sql`
    - `database/schema.sql` (creates `game_players`)
    - `database/migrations/000_studygo_auth.sql` (creates StudyGo accounts and server membership)
-   - Remaining game migrations in numeric order, including `006_studygo_education.sql`.
+   - `database/migrations/006_studygo_education.sql`
+   - `database/migrations/007_auth_security.sql` (login throttling and token metadata)
+   - Remaining game migrations in numeric order.
 3. Copy `config/config.example.php` to `config/config.php`; set DB and JWT secrets through server environment variables. Do not commit `config.php`.
 4. Point the web document root to `Backend/public`. If cPanel cannot set a document root, use a public front-controller directory and keep config/src/database outside public_html.
 5. Set `GAME_JWT_SECRET` to a cryptographically random secret of at least 32 bytes. Use the same value in GameServer as `GameAuth__JwtSecret`. Set matching issuer/audience.
@@ -21,7 +23,9 @@ Initial backend foundation for shared StudyGo accounts and MMORPG authentication
 ## Initial endpoints
 - `GET /health`
 - `POST /api/v1/auth/register` JSON: `email,password,displayName`
-- `POST /api/v1/auth/login` JSON: `email,password`
+- `POST /api/v1/auth/login` JSON: `email,password` (5 failed attempts per email/IP pair triggers a 15-minute lock)
+- `POST /api/v1/auth/refresh` JSON: `refreshToken` (rotates refresh token and issues a new access token)
+- `POST /api/v1/auth/logout` JSON: `refreshToken`, plus current access token in Authorization header
 - `GET /api/v1/auth/me` Authorization: Bearer access token
 - `POST /api/v1/game/token` Authorization: Bearer access token, JSON: `serverId`
 
@@ -42,9 +46,9 @@ All endpoints below except the internal reward callback require `Authorization: 
 AI quota: 5 questions/day + 3 per verified reward callback, maximum 3 rewarded ads/day (14 questions total). Daily reset uses Asia/Jakarta. AI provider keys remain server-side. The reward callback is a signed internal adapter; production AdMob SSV signature verification must be implemented at the callback adapter before accepting Google callbacks.
 
 ## Important limitations before production
-- Add rate limiting, email verification, password reset, refresh-token rotation/revocation endpoint, device/session management and abuse monitoring.
+- Add global/IP rate limiting beyond login throttling, email verification, password reset, session listing/revocation UI, and abuse monitoring. Refresh-token rotation and logout endpoints are now implemented.
 - Configure CORS with exact app/web origins. Native Flutter clients do not need permissive wildcard CORS.
 - Add server onboarding/membership workflow and admin tools.
 - Implement education APIs, AI provider proxy, quotas, planner, subjects, materials, notes, reminders, AdMob reward verification and admin dashboard.
-- Review login token storage and threat model before release. This initial API uses opaque random bearer tokens stored hashed in the refresh-token table; it is not a full OAuth implementation.
+- Review login token storage and threat model before release. Opaque random bearer tokens are stored as SHA-256 hashes; access tokens last 15 minutes and refresh tokens rotate on use. This is not a full OAuth/OIDC implementation.
 - Do not return provider API keys to the Flutter client.
