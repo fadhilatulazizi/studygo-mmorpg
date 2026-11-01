@@ -29,7 +29,7 @@ Initial backend foundation for shared StudyGo accounts and MMORPG authentication
 - `GET /api/v1/auth/me` Authorization: Bearer access token
 - `POST /api/v1/game/token` Authorization: Bearer access token, JSON: `serverId`
 
-Registration currently creates an account only; it does not automatically create a game character or server membership. MMORPG token issuance is denied until a server membership exists. The game token is short-lived HS256 and is issued only after membership and server status are checked.
+Registration creates a StudyGo account and a linked MMORPG player identity in one database transaction; it does not automatically create a game character or server membership. MMORPG token issuance is denied until a server membership exists. The game token is short-lived HS256 and is issued only after membership and server status are checked.
 
 ## Education API endpoints
 All endpoints below except the internal reward callback require `Authorization: Bearer <accessToken>`.
@@ -46,9 +46,9 @@ All endpoints below except the internal reward callback require `Authorization: 
 AI quota: 5 questions/day + 3 per verified reward callback, maximum 3 rewarded ads/day (14 questions total). Daily reset uses Asia/Jakarta. AI provider keys remain server-side. The reward callback is a signed internal adapter; production AdMob SSV signature verification must be implemented at the callback adapter before accepting Google callbacks.
 
 ## Important limitations before production
-- Add global/IP rate limiting beyond login throttling, email verification, password reset, session listing/revocation UI, and abuse monitoring. Refresh-token rotation and logout endpoints are now implemented.
+- Add global/IP rate limiting beyond login throttling, email verification, password reset, session listing/revocation UI, and abuse monitoring. Refresh-token rotation and logout endpoints are implemented, but need integration tests.
 - Configure CORS with exact app/web origins. Native Flutter clients do not need permissive wildcard CORS.
 - Add server onboarding/membership workflow and admin tools.
-- Implement education APIs, AI provider proxy, quotas, planner, subjects, materials, notes, reminders, AdMob reward verification and admin dashboard.
+- Implement remaining education modules: materials and secure uploads, image-question recognition, reminders/notifications, verified AdMob SSV adapter, and admin dashboard.
 - Review login token storage and threat model before release. Opaque random bearer tokens are stored as SHA-256 hashes; access tokens last 15 minutes and refresh tokens rotate on use. This is not a full OAuth/OIDC implementation.
 - Do not return provider API keys to the Flutter client.
