@@ -1,7 +1,7 @@
 # StudyGo Backend — cPanel Deployment
 
 Target API: https://api.studygo.turaja.id
-Document root: Backend/public (recommended)
+Document root: the uploaded `Backend/public` directory (recommended)
 Runtime: PHP 8.1+; PHP 8.3 recommended
 
 ## 1. Confirm hosting capabilities
@@ -24,34 +24,30 @@ Create `api.studygo.turaja.id` in **Domains → Create A New Domain** (or Subdom
 Recommended layout:
 ```
 /home/CPANEL_USER/
-  studygo-backend/             # private application source
+  studygo-backend/             # full Backend/ folder; outside the web root
     src/
     config/
     database/
     bin/
     var/private-uploads/
-  api.studygo.turaja.id/       # only public web files
-    .htaccess
-    index.php
-    health.php
+    public/                    # set this as the subdomain document root
+      .htaccess
+      index.php
+      health.php
 ```
 Do not expose `src`, `config`, `database`, `bin`, or private uploads through the web.
 
 ## 3. Upload backend
 
-Download the repository ZIP from GitHub, extract it locally, then upload the contents of `Backend/` to a private folder named `studygo-backend` in your hosting home directory. Copy only the contents of `Backend/public/` into the subdomain document root.
+Download the repository ZIP from GitHub and extract it locally. Upload the entire `Backend/` folder as `/home/CPANEL_USER/studygo-backend/`. In cPanel **Domains**, set the document root of `api.studygo.turaja.id` to:
 
-Because `public/index.php` currently loads `../src/bootstrap.php`, the recommended layout above requires either:
-A. place the full Backend folder one level above the document root and keep the public folder as the document root; or
-B. update the bootstrap path to the actual private folder.
-The simplest cPanel layout is:
 ```
-/home/CPANEL_USER/studygo-backend/  # full Backend directory
-/home/CPANEL_USER/api.studygo.turaja.id/ # contents of Backend/public
+/home/CPANEL_USER/studygo-backend/public
 ```
-Then edit public `index.php` to require `/home/CPANEL_USER/studygo-backend/src/bootstrap.php` using the real absolute path. Keep this path private and never put credentials in the public folder.
 
-Copy `Backend/config/config.example.php` to `studygo-backend/config/config.php`. Edit the PHP array values directly; do not upload production secrets to GitHub.
+This layout is intentional: the web server exposes only `public/`, while `src/`, `config/`, `database/`, `bin/`, and private uploads remain outside the document root. Keep the existing `public/index.php` unchanged; its `../src/bootstrap.php` path will resolve correctly. If cPanel does not allow changing the document root to this location, stop and share the current document-root path before uploading; do not copy private source files into a public directory.
+
+Copy `studygo-backend/config/config.example.php` to `studygo-backend/config/config.php`. Edit the PHP array values directly; do not upload production secrets to GitHub.
 
 ## 4. Create MySQL database and user
 
