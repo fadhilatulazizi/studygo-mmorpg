@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS studygo_refresh_tokens (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
     token_hash CHAR(64) NOT NULL,
+    token_type ENUM('access','refresh') NOT NULL,
     expires_at DATETIME NOT NULL,
     revoked_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
