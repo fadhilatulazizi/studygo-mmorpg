@@ -3,9 +3,9 @@
 
 ALTER TABLE player_marches
     ADD COLUMN return_seconds INT UNSIGNED NULL,
-    ADD COLUMN IF NOT EXISTS mission_settled_at DATETIME NULL,
-    ADD COLUMN IF NOT EXISTS recall_requested_at DATETIME NULL,
-    ADD COLUMN IF NOT EXISTS result_json JSON NULL;
+    ADD COLUMN mission_settled_at DATETIME NULL,
+    ADD COLUMN recall_requested_at DATETIME NULL,
+    ADD COLUMN result_json JSON NULL;
 
 CREATE TABLE IF NOT EXISTS march_settlements (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
