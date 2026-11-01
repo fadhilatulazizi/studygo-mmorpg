@@ -1,15 +1,74 @@
+using StudyGo.GameServer.WorldMap;
+
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+
+var worldMap = new WorldMapService(new WorldMapOptions
+{
+    RegionSize = 64,
+    MapMinCoordinate = 0,
+    MapMaxCoordinate = 4095
+});
 
 app.MapGet("/health", () => Results.Ok(new
 {
     ok = true,
     service = "studygo-game-server",
-    status = "scaffold"
+    status = "world-map-prototype"
 }));
 
-// Prototype only. Add authenticated sessions, authoritative simulation,
-// instance management, rate limits and protocol validation before production.
+app.MapGet("/world/region", (string serverId, int regionX, int regionY) =>
+{
+    try
+    {
+        return Results.Ok(worldMap.GetRegion(serverId, regionX, regionY));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/world/map", (string serverId, int centerX, int centerY, int radius, int? limit) =>
+{
+    try
+    {
+        var objects = worldMap.GetNearby(serverId, centerX, centerY, radius, limit ?? 200);
+        return Results.Ok(new
+        {
+            serverId,
+            centerX,
+            centerY,
+            radius,
+            count = objects.Count,
+            objects
+        });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/world/search", (
+    string serverId,
+    string? type,
+    string? query,
+    int? minLevel,
+    int? maxLevel,
+    int? limit) =>
+{
+    try
+    {
+        var results = worldMap.Search(serverId, type, query, minLevel, maxLevel, limit ?? 100);
+        return Results.Ok(new { serverId, count = results.Count, results });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 app.Map("/ws", async context =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
@@ -33,7 +92,7 @@ app.Map("/ws", async context =>
             break;
         }
 
-        // Echo is only a connectivity test, not a game protocol.
+        // Temporary connectivity echo. Replace with authenticated game messages.
         await socket.SendAsync(
             buffer.AsMemory(0, result.Count),
             result.MessageType,
