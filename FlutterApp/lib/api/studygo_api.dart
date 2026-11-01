@@ -77,6 +77,18 @@ class StudyGoApi {
     user = (result['user'] as Map?)?.cast<String, dynamic>();
   }
 
+  Future<void> verifyEmail(String token) async {
+    await _request('POST', '/api/v1/auth/email/verify', auth: false, body: {'token': token});
+  }
+
+  Future<void> resetPassword(String token, String password) async {
+    await _request('POST', '/api/v1/auth/password/reset', auth: false, body: {'token': token, 'password': password});
+  }
+
+  Future<void> resendVerification(String email) async {
+    await _request('POST', '/api/v1/auth/email/resend', auth: false, body: {'email': email});
+  }
+
   Future<void> forgotPassword(String email) async {
     await _request('POST', '/api/v1/auth/password/forgot', auth: false, body: {'email': email});
   }
@@ -147,6 +159,9 @@ class StudyGoApi {
       throw ApiException(streamed.statusCode, body.isEmpty ? 'upload_failed' : body);
     }
   }
+  Future<Map<String, dynamic>> createReminder(String title, DateTime remindAt, {String? message}) async =>
+      (await _request('POST', '/api/v1/reminders', body: {'title': title, 'remindAt': remindAt.toUtc().toIso8601String(), 'message': message}))['reminder'] as Map<String, dynamic>;
+  Future<List<dynamic>> reminders() async => (await _request('GET', '/api/v1/reminders'))['reminders'] as List<dynamic>;
   Future<List<dynamic>> notifications() async => (await _request('GET', '/api/v1/notifications'))['notifications'] as List<dynamic>;
   Future<void> markNotificationRead(int id) async { await _request('POST', '/api/v1/notifications/$id/read'); }
   Future<List<dynamic>> sessions() async => (await _request('GET', '/api/v1/auth/sessions'))['sessions'] as List<dynamic>;
