@@ -68,19 +68,19 @@ jobs:
               gradle_files.extend(pub_cache.glob("*/android/build.gradle.kts"))
 
           pattern = re.compile(
-              r"(?m)^(\\s*compileSdk(?:Version)?\\s*=?\\s*)"
-              r"(?:flutter\\.compileSdkVersion|\\d+)(\\s*(?://.*)?)$"
+              r"(?m)^(\s*compileSdk(?:Version)?\s*=?\s*)"
+              r"(?:flutter\.compileSdkVersion|\\d+)(\s*(?://.*)?)$"
           )
           changed = []
           for gradle_file in gradle_files:
               original = gradle_file.read_text()
-              updated, count = pattern.subn(r"\\g<1>36\\g<2>", original)
+              updated, count = pattern.subn(r"\g<1>36\g<2>", original)
               if count:
                   gradle_file.write_text(updated)
                   changed.append(str(gradle_file))
 
           app_text = app_file.read_text()
-          if not re.search(r"(?m)^\\s*compileSdk(?:Version)?\\s*=?\\s*36\\s*$", app_text):
+          if not re.search(r"(?m)^\s*compileSdk(?:Version)?\s*=?\s*36\s*$", app_text):
               raise SystemExit(f"Failed to set app compileSdk to 36 in {app_file}")
 
           print(f"Set compileSdk 36 in {len(changed)} Gradle files:")
