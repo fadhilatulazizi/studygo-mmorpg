@@ -69,7 +69,7 @@ jobs:
 
           pattern = re.compile(
               r"(?m)^(\s*compileSdk(?:Version)?\s*=?\s*)"
-              r"(?:flutter\.compileSdkVersion|\\d+)(\s*(?://.*)?)$"
+              r"(?:flutter\.compileSdkVersion|\d+)(\s*(?://.*)?)$"
           )
           changed = []
           for gradle_file in gradle_files:
