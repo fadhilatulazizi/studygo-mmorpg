@@ -158,8 +158,15 @@ final class ApiKernel
             $q->execute([hash('sha256',$token)]);$row=$q->fetch();
             if(!$row||$row['account_status']!=='active'){$this->pdo->rollBack();$this->respond(401,['error'=>'invalid_refresh_token']);return;}
             $this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP(),last_used_at=UTC_TIMESTAMP() WHERE id=?")->execute([$row['id']]);
+            $access=$this->randomToken(32);$refreshNew=$this->randomToken(48);
+            $days=max(1,min(90,(int)($this->config['auth']['refresh_ttl_days']??30)));
+            $device=mb_substr(trim((string)($_SERVER['HTTP_X_DEVICE_LABEL']??$row['device_label']??'')),0,100);
+            $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,session_id,expires_at) VALUES(?,?,'access',?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))");
+            $ins->execute([(int)$row['user_id'],hash('sha256',$access),$device?:null,$row['session_id']]);
+            $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,session_id,expires_at) VALUES(?,?,'refresh',?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))");
+            $ins->execute([(int)$row['user_id'],hash('sha256',$refreshNew),$device?:null,$row['session_id']]);
             $this->pdo->commit();
-            $this->issueSession((int)$row['user_id'],['id'=>(int)$row['uid'],'email'=>$row['email'],'displayName'=>$row['display_name']],(string)$row['session_id']);
+            $this->respond(200,['user'=>['id'=>(int)$row['uid'],'email'=>$row['email'],'displayName'=>$row['display_name']],'accessToken'=>$access,'tokenType'=>'Bearer','expiresIn'=>900,'refreshToken'=>$refreshNew,'refreshExpiresIn'=>$days*86400]);
         } catch(\Throwable $e) {if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
     }
 
