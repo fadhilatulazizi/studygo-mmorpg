@@ -103,3 +103,22 @@ jobs:
           TEST_DB_USER: root
           TEST_DB_PASSWORD: test-root-password
         run: php Backend/tests/integration.php
+
+  flutter:
+    name: Validate Flutter API client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        working-directory: FlutterApp
+        run: flutter pub get
+      - name: Analyze Flutter sources
+        working-directory: FlutterApp
+        run: flutter analyze --no-pub
+      - name: Run Flutter tests
+        working-directory: FlutterApp
+        run: flutter test --no-pub
