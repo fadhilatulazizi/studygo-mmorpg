@@ -77,6 +77,10 @@ class StudyGoApi {
     user = (result['user'] as Map?)?.cast<String, dynamic>();
   }
 
+  Future<void> forgotPassword(String email) async {
+    await _request('POST', '/api/v1/auth/password/forgot', auth: false, body: {'email': email});
+  }
+
   Future<void> register(String name, String email, String password) async {
     await _request('POST', '/api/v1/auth/register', auth: false,
         body: {'displayName': name, 'email': email, 'password': password});
@@ -140,7 +144,7 @@ class StudyGoApi {
     }
   }
   Future<List<dynamic>> notifications() async => (await _request('GET', '/api/v1/notifications'))['notifications'] as List<dynamic>;
-  Future<void> markNotificationRead(int id) async => _request('POST', '/api/v1/notifications/$id/read');
+  Future<void> markNotificationRead(int id) async { await _request('POST', '/api/v1/notifications/$id/read'); }
   Future<List<dynamic>> sessions() async => (await _request('GET', '/api/v1/auth/sessions'))['sessions'] as List<dynamic>;
   Future<void> revokeSession(String id) async => _request('DELETE', '/api/v1/auth/sessions/$id');
   Future<String> solveImage(File file, String mimeType) async {
