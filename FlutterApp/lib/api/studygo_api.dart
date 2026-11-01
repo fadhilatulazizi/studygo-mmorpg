@@ -26,6 +26,17 @@ class StudyGoApi {
     _refreshToken = await _storage.read(key: 'refresh_token');
   }
 
+  Future<void> resume() async {
+    if (_accessToken == null && _refreshToken == null) return;
+    try {
+      final result = await _request('GET', '/api/v1/auth/me');
+      user = (result['user'] as Map?)?.cast<String, dynamic>();
+    } catch (_) {
+      user = null;
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>> _request(
     String method,
     String path, {
@@ -34,7 +45,7 @@ class StudyGoApi {
     bool retry = true,
   }) async {
     Future<http.Response> send() async {
-      final headers = <String, String>{'Accept': 'application/json'};
+      final headers = <String, String>{'Accept': 'application/json', 'X-Device-Label': 'StudyGo Flutter'};
       if (body != null) headers['Content-Type'] = 'application/json';
       if (auth && _accessToken != null) headers['Authorization'] = 'Bearer $_accessToken';
       final uri = Uri.parse('$baseUrl$path');
