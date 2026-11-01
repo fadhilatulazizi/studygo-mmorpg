@@ -133,13 +133,13 @@ final class ApiKernel
 
     private function issueSession(int $userId,array $user): void
     {
-        $access=$this->randomToken(32);$refresh=$this->randomToken(48);
+        $access=$this->randomToken(32);$refresh=$this->randomToken(48);$sessionId=$this->randomUuid();
         $days=max(1,min(90,(int)($this->config['auth']['refresh_ttl_days']??30)));
         $device=mb_substr(trim((string)($_SERVER['HTTP_X_DEVICE_LABEL']??'')),0,100);
-        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,expires_at) VALUES(?,?,'access',?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))");
-        $ins->execute([$userId,hash('sha256',$access),$device?:null]);
-        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,expires_at) VALUES(?,?,'refresh',?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))");
-        $ins->execute([$userId,hash('sha256',$refresh),$device?:null]);
+        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,session_id,expires_at) VALUES(?,?,'access',?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))");
+        $ins->execute([$userId,hash('sha256',$access),$device?:null,$sessionId]);
+        $ins=$this->pdo->prepare("INSERT INTO studygo_refresh_tokens(user_id,token_hash,token_type,device_label,session_id,expires_at) VALUES(?,?,'refresh',?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ".$days." DAY))");
+        $ins->execute([$userId,hash('sha256',$refresh),$device?:null,$sessionId]);
         $this->respond(200,['user'=>$user,'accessToken'=>$access,'tokenType'=>'Bearer','expiresIn'=>900,'refreshToken'=>$refresh,'refreshExpiresIn'=>$days*86400]);
     }
 
