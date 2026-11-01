@@ -78,7 +78,7 @@ class _StudyHomeState extends State<StudyHome> {
         NavigationDestination(icon:Icon(Icons.auto_awesome),label:'AI Tutor'),NavigationDestination(icon:Icon(Icons.checklist),label:'Planner'),NavigationDestination(icon:Icon(Icons.folder),label:'Materi'),NavigationDestination(icon:Icon(Icons.notifications),label:'Notifikasi')]));
   }
   Widget _tutor()=>ListView(padding:const EdgeInsets.all(16),children:[
-    FutureBuilder<Map<String,dynamic>>(future:widget.api.quota(),builder:(c,s)=>Card(child:Padding(padding:const EdgeInsets.all(16),child:Text(s.hasData?'Sisa pertanyaan hari ini: \${s.data!['questionsRemaining']}':'Memuat kuota...')))),
+    FutureBuilder<Map<String,dynamic>>(future:widget.api.quota(),builder:(c,s)=>Card(child:Padding(padding:const EdgeInsets.all(16),child:Text(s.hasData?'Sisa pertanyaan hari ini: ${s.data!['questionsRemaining']}':'Memuat kuota...')))),
     TextField(controller:question,minLines:3,maxLines:6,decoration:const InputDecoration(labelText:'Tanyakan materi atau soal',border:OutlineInputBorder())),
     const SizedBox(height:12),FilledButton.icon(onPressed:()=>run(()async{output=await widget.api.ask(question.text);}),icon:const Icon(Icons.send),label:const Text('Tanya AI')),
     OutlinedButton.icon(onPressed:()=>run(()async{final x=await ImagePicker().pickImage(source:ImageSource.gallery,imageQuality:85);if(x!=null)output=await widget.api.solveImage(File(x.path),x.mimeType??'image/jpeg');}),icon:const Icon(Icons.image_search),label:const Text('Foto soal')),
@@ -86,11 +86,28 @@ class _StudyHomeState extends State<StudyHome> {
   ]);
   Widget _planner()=>ListView(padding:const EdgeInsets.all(16),children:[
     Row(children:[Expanded(child:TextField(controller:task,decoration:const InputDecoration(labelText:'Tugas baru',border:OutlineInputBorder()))),IconButton(onPressed:()=>run(()async{await widget.api.createTask(task.text);task.clear();}),icon:const Icon(Icons.add_circle))]),
-    const SizedBox(height:12),FutureBuilder<List<dynamic>>(future:widget.api.tasks(),builder:(c,s)=>s.hasError?Text('\${s.error}'):Column(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.task_alt),title:Text(e['title'].toString()),subtitle:Text(e['status'].toString()))).toList())),
+    const SizedBox(height:12),FutureBuilder<List<dynamic>>(future:widget.api.tasks(),builder:(c,s)=>s.hasError?Text('${s.error}'):Column(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.task_alt),title:Text(e['title'].toString()),subtitle:Text(e['status'].toString()))).toList())),
   ]);
   Widget _materials()=>ListView(padding:const EdgeInsets.all(16),children:[
     FilledButton.icon(onPressed:()=>run(()async{final r=await FilePicker.platform.pickFiles(withData:true,type:FileType.custom,allowedExtensions:['pdf','docx','pptx','mp4','webm','jpg','jpeg','png','webp']);if(r!=null)await widget.api.uploadMaterial(r.files.single);}),icon:const Icon(Icons.upload_file),label:const Text('Upload PDF / DOCX / PPTX / Video / Gambar')),
-    FutureBuilder<List<dynamic>>(future:widget.api.materials(),builder:(c,s)=>s.hasError?Text('\${s.error}'):Column(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.insert_drive_file),title:Text(e['title'].toString()),subtitle:Text('\${e['material_type']} • \${e['original_name']}'))).toList())),
+    FutureBuilder<List<dynamic>>(future:widget.api.materials(),builder:(c,s)=>s.hasError?Text('${s.error}'):Column(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.insert_drive_file),title:Text(e['title'].toString()),subtitle:Text('${e['material_type']} • ${e['original_name']}'))).toList())),
   ]);
-  Widget _notifications()=>FutureBuilder<List<dynamic>>(future:widget.api.notifications(),builder:(c,s)=>s.hasError?Text('\${s.error}'):ListView(children:(s.data??[]).map((e)=>ListTile(leading:const Icon(Icons.notifications_active),title:Text(e['title'].toString()),subtitle:Text(e['body'].toString()),onTap:()=>run(()async{await widget.api.markNotificationRead(int.parse(e['id'].toString()));setState((){});})).toList()));
+  Widget _notifications() => FutureBuilder<List<dynamic>>(
+    future: widget.api.notifications(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return Text('${snapshot.error}');
+      final items = snapshot.data ?? [];
+      return ListView(
+        children: items.map((item) => ListTile(
+          leading: const Icon(Icons.notifications_active),
+          title: Text(item['title'].toString()),
+          subtitle: Text(item['body'].toString()),
+          onTap: () => run(() async {
+            await widget.api.markNotificationRead(int.parse(item['id'].toString()));
+            setState(() {});
+          }),
+        )).toList(),
+      );
+    },
+  );
 }
