@@ -195,7 +195,7 @@ final class ApiKernel
         $rewardAmount=(int)($settings['ads.admob_reward_amount']??3);
         $userId=filter_var($params['user_id'],FILTER_VALIDATE_INT);
         $amount=filter_var($params['reward_amount'],FILTER_VALIDATE_INT);
-        $eventMs=filter_var($params['timestamp'],FILTER_VALIDATE_INT);
+        $eventMs=filter_var($params['timestamp'],FILTER_VALIDATE_INT);\n        // AdMob timestamp examples have appeared in both ms and microsecond-sized form.\n        if ($eventMs!==false && $eventMs>100000000000000) $eventMs=(int)floor($eventMs/1000);
         $transaction=trim((string)$params['transaction_id']);
         if (!$allowedUnits || !in_array($unit,$allowedUnits,true) || $userId===false || $userId<=0 ||
             $amount===false || $amount!==$rewardAmount || (string)$params['reward_item']!==$rewardItem ||
