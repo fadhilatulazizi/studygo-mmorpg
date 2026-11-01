@@ -88,7 +88,7 @@ final class ApiKernel
         $name=trim((string)($b['displayName']??''));
         if(!filter_var($email,FILTER_VALIDATE_EMAIL)||strlen($email)>190)throw new \InvalidArgumentException('invalid_email');
         if(strlen($password)<10||strlen($password)>200)throw new \InvalidArgumentException('password_must_be_10_to_200_characters');
-        if($name===''||mb_strlen($name)>80)throw new \InvalidArgumentException('invalid_display_name');
+        if($name===''||mb_strlen($name)>40)throw new \InvalidArgumentException('invalid_display_name');
         $this->pdo->beginTransaction();
         try{
             $q=$this->pdo->prepare("INSERT INTO studygo_users(email,password_hash,display_name) VALUES(?,?,?)");
