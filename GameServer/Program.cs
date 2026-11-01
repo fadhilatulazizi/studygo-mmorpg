@@ -1,6 +1,14 @@
 using StudyGo.GameServer.WorldMap;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var gameDatabase = builder.Configuration.GetConnectionString("GameDatabase");
+if (!string.IsNullOrWhiteSpace(gameDatabase))
+{
+    builder.Services.AddSingleton(new MySqlWorldSpawnRepository(gameDatabase));
+    builder.Services.AddHostedService<StudyGo.GameServer.Workers.WorldSpawnWorker>();
+}
+
 var app = builder.Build();
 
 var worldMap = new WorldMapService(new WorldMapOptions
@@ -14,7 +22,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     ok = true,
     service = "studygo-game-server",
-    status = "world-map-prototype"
+    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-and-spawn-worker"
 }));
 
 app.MapGet("/world/region", (string serverId, int regionX, int regionY) =>
