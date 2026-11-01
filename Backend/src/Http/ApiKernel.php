@@ -45,7 +45,10 @@ final class ApiKernel
                 return;
             }
             if ($method === 'POST' && $path === '/api/v1/game/token') { $this->gameToken($body); return; }
-            if ($method === 'GET' && $path === '/internal/ads/admob-ssv') {\n                $this->admobSsv(); return;\n            }\n            if ($method === 'POST' && $path === '/internal/ads/reward-callback') {
+            if ($method === 'GET' && $path === '/internal/ads/admob-ssv') {
+                $this->admobSsv(); return;
+            }
+            if ($method === 'POST' && $path === '/internal/ads/reward-callback') {
                 $education=new EducationApi($this->pdo,$this->config);
                 $result=$education->rewardCallback($body,(string)($_SERVER['HTTP_X_STUDYGO_SIGNATURE']??''));
                 $this->respond(200,$result); return;
