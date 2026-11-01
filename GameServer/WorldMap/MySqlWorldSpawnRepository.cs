@@ -267,6 +267,37 @@ public sealed class MySqlWorldSpawnRepository
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
+    public async Task<IReadOnlyList<SpawnCycleResult>> RunAllEnabledServersAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var serverIds = new List<string>();
+        await using (var connection = new MySqlConnection(_connectionString))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new MySqlCommand(
+                """
+                SELECT DISTINCT z.server_id
+                FROM world_spawn_zones z
+                INNER JOIN game_servers s ON s.server_id = z.server_id
+                WHERE z.is_enabled = 1
+                  AND s.server_status IN ('open','protected','transfer_locked')
+                ORDER BY z.server_id
+                """, connection);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                serverIds.Add(reader.GetString("server_id"));
+        }
+
+        var results = new List<SpawnCycleResult>();
+        foreach (var serverId in serverIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.AddRange(await RunServerCycleAsync(serverId, cancellationToken));
+        }
+
+        return results;
+    }
+
     private static void ValidateServerId(string serverId)
     {
         if (string.IsNullOrWhiteSpace(serverId) || serverId.Length > 48 ||
