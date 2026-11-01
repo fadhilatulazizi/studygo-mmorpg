@@ -1,4 +1,5 @@
 using StudyGo.GameServer.WorldMap;
+using StudyGo.GameServer.Marches;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -6,7 +7,9 @@ var gameDatabase = builder.Configuration.GetConnectionString("GameDatabase");
 if (!string.IsNullOrWhiteSpace(gameDatabase))
 {
     builder.Services.AddSingleton(new MySqlWorldSpawnRepository(gameDatabase));
+    builder.Services.AddSingleton(new MySqlMarchRepository(gameDatabase));
     builder.Services.AddHostedService<StudyGo.GameServer.Workers.WorldSpawnWorker>();
+    builder.Services.AddHostedService<StudyGo.GameServer.Workers.MarchArrivalWorker>();
 }
 
 var app = builder.Build();
@@ -22,7 +25,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     ok = true,
     service = "studygo-game-server",
-    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-and-spawn-worker"
+    status = string.IsNullOrWhiteSpace(gameDatabase) ? "world-map-prototype-db-disabled" : "world-map-spawn-and-march-workers"
 }));
 
 app.MapGet("/world/region", (string serverId, int regionX, int regionY) =>
