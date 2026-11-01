@@ -30,6 +30,7 @@ final class EducationApi
             if ($method === 'PATCH') return ['status'=>200,'data'=>['note'=>$this->updateNote($userId,(int)$m[1],$body)]];
             if ($method === 'DELETE') { $this->deleteNote($userId,(int)$m[1]); return ['status'=>200,'data'=>['deleted'=>true]]; }
         }
+        if ($method === 'POST' && $path === '/api/v1/ai/solve-image') return ['status'=>200,'data'=>['answer'=>$this->solveImage($userId,$body)]];
         if ($method === 'GET' && $path === '/api/v1/ai/quota') return ['status'=>200,'data'=>$this->quota($userId)];
         if ($method === 'POST' && $path === '/api/v1/ai/tutor') return ['status'=>200,'data'=>['answer'=>$this->askTutor($userId,$body)]];
         return null;
@@ -158,6 +159,48 @@ final class EducationApi
             throw $e;
         }
     }
+    private function solveImage(int $u,array $b): string
+    {
+        $mime=(string)($b['mimeType']??'');$data=(string)($b['imageBase64']??'');
+        if(!in_array($mime,['image/jpeg','image/png','image/webp'],true)||$data===''||strlen($data)>11000000)throw new \InvalidArgumentException('invalid_image_payload');
+        $binary=base64_decode($data,true);if($binary===false||strlen($binary)>8000000)throw new \InvalidArgumentException('image_too_large_or_invalid');
+        $finfo=new \finfo(FILEINFO_MIME_TYPE);if($finfo->buffer($binary)!==$mime)throw new \InvalidArgumentException('image_mime_mismatch');
+        $prompt=trim((string)($b['question']??'Bacalah soal pada gambar dan jelaskan cara menyelesaikannya langkah demi langkah.'));
+        if(mb_strlen($prompt)>3000)throw new \InvalidArgumentException('question_too_long');
+        $requestId=(string)($b['requestId']??'');if(!preg_match('/^[0-9a-fA-F-]{36}$/',$requestId))throw new \InvalidArgumentException('valid_request_id_required');
+        $this->pdo->beginTransaction();
+        try{
+            $this->pdo->prepare("INSERT IGNORE INTO study_ai_daily_usage(user_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)))")->execute([$u]);
+            $q=$this->pdo->prepare("SELECT questions_used,rewarded_questions FROM study_ai_daily_usage WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");$q->execute([$u]);$usage=$q->fetch();
+            if((int)$usage['questions_used']>=5+(int)$usage['rewarded_questions'])throw new \DomainException('daily_ai_quota_exceeded');
+            $this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=questions_used+1 WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$u]);
+            $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
+            $this->pdo->prepare("INSERT INTO study_ai_requests(user_id,request_id,provider,model,prompt_hash) VALUES(?,?,?,?,?)")->execute([$u,$requestId,$provider,$model,hash('sha256',$prompt.'|'.hash('sha256',$binary))]);
+            $this->pdo->commit();
+        }catch(\Throwable $e){if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        try{return $this->callImageProvider($prompt,$mime,$data);}
+        catch(\Throwable $e){$this->pdo->prepare("UPDATE study_ai_daily_usage SET questions_used=GREATEST(questions_used-1,0) WHERE user_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$u]);$this->pdo->prepare("DELETE FROM study_ai_requests WHERE user_id=? AND request_id=?")->execute([$u,$requestId]);throw $e;}
+    }
+    private function callImageProvider(string $prompt,string $mime,string $base64): string
+    {
+        if(!function_exists('curl_init'))throw new \RuntimeException('php_curl_extension_required');
+        $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
+        $system='Anda adalah StudyGo AI Tutor. Baca gambar soal dengan teliti, tulis informasi yang diketahui, jelaskan langkah penyelesaian, dan berikan jawaban akhir. Jika gambar tidak terbaca, minta pengguna mengirim ulang.';
+        if($provider==='openai'){
+            $key=(string)($this->config['ai']['openai_api_key']??'');if($key==='')throw new \RuntimeException('ai_provider_not_configured');
+            $url='https://api.openai.com/v1/responses';$payload=['model'=>$model,'input'=>[['role'=>'system','content'=>$system],['role'=>'user','content'=>[['type'=>'input_text','text'=>$prompt],['type'=>'input_image','image_url'=>'data:'.$mime.';base64,'.$base64]]]]];$headers=['Authorization: Bearer '.$key,'Content-Type: application/json'];
+        }else{
+            $key=(string)($this->config['ai']['gemini_api_key']??'');if($key==='')throw new \RuntimeException('ai_provider_not_configured');
+            $url='https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent?key='.rawurlencode($key);
+            $payload=['systemInstruction'=>['parts'=>[['text'=>$system]]],'contents'=>[['role'=>'user','parts'=>[['text'=>$prompt],['inlineData'=>['mimeType'=>$mime,'data'=>$base64]]]]],'generationConfig'=>['temperature'=>0.3,'maxOutputTokens'=>2048]];$headers=['Content-Type: application/json'];
+        }
+        $ch=curl_init($url);curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>json_encode($payload,JSON_THROW_ON_ERROR),CURLOPT_CONNECTTIMEOUT=>10,CURLOPT_TIMEOUT=>60]);
+        $raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);
+        if($raw===false||$code<200||$code>=300){error_log('StudyGo image AI provider HTTP '.$code.' '.$err);throw new \RuntimeException('ai_service_unavailable');}
+        $d=json_decode($raw,true);$answer=$provider==='openai'?($d['output'][0]['content'][0]['text']??null):($d['candidates'][0]['content']['parts'][0]['text']??null);
+        if(!is_string($answer)||$answer==='')throw new \RuntimeException('ai_empty_response');return $answer;
+    }
+
     private function callProvider(string $prompt): string {
         if(!function_exists('curl_init'))throw new \RuntimeException('php_curl_extension_required');
         $provider=(string)($this->config['ai']['provider']??'gemini');$model=(string)($this->config['ai']['model']??'gemini-2.5-flash');
