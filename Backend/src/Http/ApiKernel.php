@@ -59,6 +59,8 @@ final class ApiKernel
             }
 
             $user=$this->authenticatedUser();
+            if ($method === 'GET' && preg_match('#^/api/v1/materials/(\\d+)/download$#',$path,$dm)) { $this->downloadMaterial((int)$user['id'],(int)$dm[1]); return; }
+            if ($path === '/api/v1/admin/education/dashboard' && $method === 'GET') { $this->adminEducationDashboard((int)$user['id']); return; }
             if ($method === 'GET' && $path === '/api/v1/auth/sessions') { $this->listSessions((int)$user['id']); return; }
             if (preg_match('#^/api/v1/auth/sessions/([0-9a-fA-F-]{36})$#',$path,$sm) && $method === 'DELETE') { $this->revokeSession((int)$user['id'],$sm[1]); return; }
             $education=new EducationApi($this->pdo,$this->config);
@@ -272,6 +274,28 @@ final class ApiKernel
         $result['ssvEnabled']=($result['ssvEnabled']==='1');
         $result['rewardAmount']=(int)($result['rewardAmount']?:3);
         $this->respond(200,['ads'=>$result]);
+    }
+
+    private function downloadMaterial(int $userId,int $id): void
+    {
+        $q=$this->pdo->prepare("SELECT original_name,storage_name,mime_type,file_size FROM study_materials WHERE id=? AND user_id=?");$q->execute([$id,$userId]);$r=$q->fetch();
+        if(!$r){$this->respond(404,['error'=>'material_not_found']);return;}
+        $dir=(string)($this->config['uploads']['directory']??(sys_get_temp_dir().'/studygo-uploads'));
+        $path=rtrim($dir,DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$r['storage_name'];
+        if(!is_file($path)){ $this->respond(404,['error'=>'material_file_missing']);return; }
+        header('Content-Type: '.$r['mime_type']);header('Content-Length: '.(string)$r['file_size']);
+        header('Content-Disposition: attachment; filename="'.str_replace('"','',basename($r['original_name'])).'"');
+        header('X-Content-Type-Options: nosniff');readfile($path);exit;
+    }
+    private function adminEducationDashboard(int $userId): void
+    {
+        $q=$this->pdo->prepare("SELECT admin_role FROM studygo_admin_users WHERE user_id=?");$q->execute([$userId]);
+        if(!in_array($q->fetchColumn(),['owner','admin','editor','support'],true)){$this->respond(403,['error'=>'admin_access_required']);return;}
+        $counts=[];
+        foreach(['users'=>'studygo_users','materials'=>'study_materials','tasks'=>'study_tasks','notes'=>'study_notes','aiRequests'=>'study_ai_requests'] as $key=>$table)
+            $counts[$key]=(int)$this->pdo->query("SELECT COUNT(*) FROM ".$table)->fetchColumn();
+        $q=$this->pdo->query("SELECT DATE(created_at) day,COUNT(*) total FROM studygo_users WHERE created_at>=DATE_SUB(UTC_DATE(),INTERVAL 6 DAY) GROUP BY DATE(created_at) ORDER BY day");
+        $this->respond(200,['counts'=>$counts,'newUsersLast7Days'=>$q->fetchAll(),'serverTime'=>gmdate('c')]);
     }
 
     private function randomUuid(): string
