@@ -16,6 +16,15 @@ return [
         'access_ttl' => 900,
         'refresh_ttl_days' => 30,
     ],
+    'ai' => [
+        'provider' => getenv('AI_PROVIDER') ?: 'gemini',
+        'model' => getenv('AI_MODEL') ?: 'gemini-2.5-flash',
+        'gemini_api_key' => getenv('GEMINI_API_KEY') ?: '',
+        'openai_api_key' => getenv('OPENAI_API_KEY') ?: '',
+    ],
+    'ads' => [
+        'callback_secret' => getenv('AD_REWARD_CALLBACK_SECRET') ?: '',
+    ],
     'game_jwt' => [
         'secret' => getenv('GAME_JWT_SECRET') ?: '',
         'issuer' => getenv('GAME_JWT_ISSUER') ?: 'https://api.studygo.example',
