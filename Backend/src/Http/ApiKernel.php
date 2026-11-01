@@ -6,6 +6,7 @@ namespace StudyGo\Http;
 use PDO;
 use StudyGo\Education\EducationApi;
 use StudyGo\Security\GameJwtIssuer;
+use StudyGo\Ads\AdMobSsvVerifier;
 
 final class ApiKernel
 {
