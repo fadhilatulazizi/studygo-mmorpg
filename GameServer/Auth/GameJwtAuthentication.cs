@@ -13,7 +13,11 @@ public static class GameJwtAuthentication
         var audience = configuration["GameAuth:Audience"] ?? "";
         if (Encoding.UTF8.GetByteCount(secret) < 32 ||
             string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(audience))
+        {
+            services.AddAuthentication();
+            services.AddAuthorization();
             return false;
+        }
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
