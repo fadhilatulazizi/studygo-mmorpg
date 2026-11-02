@@ -96,7 +96,7 @@ class StudyGoApi {
 
   Future<void> login(String email, String password) async {
     final result = await _request('POST', '/api/v1/auth/login',
-        auth: false, body: {'email': email, 'password': password});
+        auth: false, body: {'email': email, 'password': password, if (_guestToken != null) 'guestToken': _guestToken});
     await _saveTokens(result);
     isGuest = false;
     await _storage.delete(key: 'studygo_guest_mode');
@@ -121,7 +121,7 @@ class StudyGoApi {
 
   Future<void> register(String name, String email, String password) async {
     await _request('POST', '/api/v1/auth/register', auth: false,
-        body: {'displayName': name, 'email': email, 'password': password});
+        body: {'displayName': name, 'email': email, 'password': password, if (_guestToken != null) 'guestToken': _guestToken});
   }
 
   Future<void> refresh() async {
