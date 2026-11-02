@@ -197,7 +197,7 @@ class StudyGoApi {
   Future<void> revokeSession(String id) async => _request('DELETE', '/api/v1/auth/sessions/$id');
   Future<String> solveImage(File file, String mimeType) async {
     final bytes = await file.readAsBytes();
-    final result = await _request('POST', '/api/v1/ai/solve-image', body: {
+    final result = await _request('POST', (isGuest ? '/api/v1/guest/ai/solve-image' : '/api/v1/ai/solve-image'), body: {
       'imageBase64': base64Encode(bytes), 'mimeType': mimeType,
       'requestId': const Uuid().v4(),
       'question': 'Baca dan selesaikan soal dalam gambar. Jelaskan langkahnya.'
