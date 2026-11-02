@@ -19,11 +19,16 @@ class StudyGoApi {
   final _storage = const FlutterSecureStorage();
   String? _accessToken;
   String? _refreshToken;
+  String? _guestToken;
   Map<String, dynamic>? user;
   bool isGuest = false;
 
   Future<void> startGuest() async {
+    final result = await _request('POST', '/api/v1/guest/session', auth: false);
+    _guestToken = result['guestToken']?.toString();
+    if (_guestToken == null || _guestToken!.isEmpty) throw ApiException(500, 'invalid_guest_session');
     isGuest = true;
+    await _storage.write(key: 'studygo_guest_token', value: _guestToken);
     await _storage.write(key: 'studygo_guest_mode', value: '1');
   }
 
@@ -40,7 +45,8 @@ class StudyGoApi {
   Future<void> restore() async {
     _accessToken = await _storage.read(key: 'access_token');
     _refreshToken = await _storage.read(key: 'refresh_token');
-    isGuest = await _storage.read(key: 'studygo_guest_mode') == '1' && _accessToken == null;
+    _guestToken = await _storage.read(key: 'studygo_guest_token');
+    isGuest = _guestToken != null && _guestToken!.isNotEmpty && _accessToken == null;
   }
 
   Future<void> resume() async {
@@ -65,6 +71,7 @@ class StudyGoApi {
       final headers = <String, String>{'Accept': 'application/json', 'X-Device-Label': 'StudyGo Flutter'};
       if (body != null) headers['Content-Type'] = 'application/json';
       if (auth && _accessToken != null) headers['Authorization'] = 'Bearer $_accessToken';
+      else if (auth && _guestToken != null) headers['Authorization'] = 'Bearer $_guestToken';
       final uri = Uri.parse('$baseUrl$path');
       switch (method) {
         case 'POST': return http.post(uri, headers: headers, body: jsonEncode(body ?? {}));
@@ -146,15 +153,15 @@ class StudyGoApi {
   }
 
   Future<List<dynamic>> subjects() async => (await _request('GET', '/api/v1/subjects'))['subjects'] as List<dynamic>;
-  Future<Map<String, dynamic>> quota() => _request('GET', '/api/v1/ai/quota');
+  Future<Map<String, dynamic>> quota() => _request('GET', isGuest ? '/api/v1/guest/ai/quota' : '/api/v1/ai/quota');
   Future<String> ask(String question) async {
-    final result = await _request('POST', '/api/v1/ai/tutor',
+    final result = await _request('POST', isGuest ? '/api/v1/guest/ai/tutor' : '/api/v1/ai/tutor',
         body: {'question': question, 'requestId': const Uuid().v4()});
     return result['answer'].toString();
   }
-  Future<List<dynamic>> tasks() async => (await _request('GET', '/api/v1/planner/tasks'))['tasks'] as List<dynamic>;
+  Future<List<dynamic>> tasks() async => (await _request('GET', isGuest ? '/api/v1/guest/planner/tasks' : '/api/v1/planner/tasks'))['tasks'] as List<dynamic>;
   Future<Map<String, dynamic>> createTask(String title, {String priority = 'normal'}) async =>
-      (await _request('POST', '/api/v1/planner/tasks', body: {'title': title, 'priority': priority}))['task'] as Map<String, dynamic>;
+      (await _request('POST', isGuest ? '/api/v1/guest/planner/tasks' : '/api/v1/planner/tasks', body: {'title': title, 'priority': priority}))['task'] as Map<String, dynamic>;
   Future<List<dynamic>> materials() async => (await _request('GET', '/api/v1/materials'))['materials'] as List<dynamic>;
   Future<void> uploadMaterial(PlatformFile file, {String? title}) async {
     Future<http.StreamedResponse> sendUpload() async {
