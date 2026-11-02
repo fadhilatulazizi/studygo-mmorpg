@@ -195,12 +195,13 @@ class _StudyHomeState extends State<StudyHome> {
     });
   }
   Future<void> photoQuestion() async {
-    if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Analisis foto memerlukan akun. Masuk atau daftar terlebih dahulu.'))); widget.onAccount(); return; }
     await run(() async {
       final image = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 82, maxWidth: 1800);
       if (image == null) return;
       final value = await widget.api.solveImage(File(image.path), image.mimeType ?? 'image/jpeg');
       if (mounted) setState(() => answer = value);
+      if (widget.api.isGuest) quota = await widget.api.quota();
+      if (mounted) setState(() {});
     });
   }
   Future<void> addTask() async {
