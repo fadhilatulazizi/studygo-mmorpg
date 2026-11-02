@@ -166,8 +166,11 @@ class _StudyHomeState extends State<StudyHome> {
   @override void dispose() { question.dispose(); taskInput.dispose(); super.dispose(); }
   Future<void> loadData() async {
     if (widget.api.isGuest) {
-      final local = await widget.api.localTasks();
-      if (mounted) setState(() { tasks = local; loading = false; });
+      try {
+        final local = await widget.api.tasks();
+        quota = await widget.api.quota();
+        if (mounted) setState(() { tasks = local; loading = false; });
+      } catch (_) { if (mounted) setState(() => loading = false); }
       return;
     }
     try {
@@ -184,8 +187,12 @@ class _StudyHomeState extends State<StudyHome> {
   }
   Future<void> ask() async {
     if (question.text.trim().isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tuliskan pertanyaan terlebih dahulu.'))); return; }
-    if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tutor AI memerlukan akun. Masuk atau daftar untuk menggunakan AI.'))); widget.onAccount(); return; }
-    await run(() async { final value = await widget.api.ask(question.text.trim()); if (mounted) setState(() => answer = value); });
+    await run(() async {
+      final value = await widget.api.ask(question.text.trim());
+      if (mounted) setState(() => answer = value);
+      if (widget.api.isGuest) quota = await widget.api.quota();
+      if (mounted) setState(() {});
+    });
   }
   Future<void> photoQuestion() async {
     if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Analisis foto memerlukan akun. Masuk atau daftar terlebih dahulu.'))); widget.onAccount(); return; }
@@ -199,10 +206,8 @@ class _StudyHomeState extends State<StudyHome> {
   Future<void> addTask() async {
     if (taskInput.text.trim().isEmpty) return;
     await run(() async {
-      if (widget.api.isGuest) {
-        tasks = [...tasks, {'id': DateTime.now().microsecondsSinceEpoch, 'title': taskInput.text.trim(), 'status': 'todo'}];
-        await widget.api.saveLocalTasks(tasks);
-      } else { await widget.api.createTask(taskInput.text.trim()); tasks = await widget.api.tasks(); }
+      await widget.api.createTask(taskInput.text.trim());
+      tasks = await widget.api.tasks();
       taskInput.clear(); if (mounted) setState(() {});
     });
   }
@@ -270,13 +275,13 @@ class _StudyHomeState extends State<StudyHome> {
   Widget stat(IconData icon, int value, String label) => Card(child: Padding(padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6), child: Column(children: [Icon(icon, color: teal, size: 19), const SizedBox(height: 7), Text('$value', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19)), Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant))])));
   Widget tutor() => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 28), children: [
     pageTitle('Tutor AI', 'Tanyakan materi atau kirim foto soal.'),
-    Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: teal.withValues(alpha: .12), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.auto_awesome, color: teal)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('StudyGo AI siap membantu', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 4), Text(widget.api.isGuest ? 'Masuk untuk membuka fitur AI' : 'Sisa pertanyaan: ${quota?['questionsRemaining'] ?? '—'}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12))]))]))),
+    Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: teal.withValues(alpha: .12), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.auto_awesome, color: teal)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('StudyGo AI siap membantu', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 4), Text('Sisa pertanyaan: ${quota?['questionsRemaining'] ?? '—'}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12))]))]))),
     const SizedBox(height: 14), TextField(controller: question, minLines: 4, maxLines: 7, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(hintText: 'Contoh: Jelaskan hukum Newton dengan contoh sederhana…', alignLabelWithHint: true)),
     const SizedBox(height: 11), FilledButton.icon(onPressed: busy ? null : ask, icon: const Icon(Icons.send_rounded), label: const Text('Kirim pertanyaan')),
     const SizedBox(height: 9), OutlinedButton.icon(onPressed: busy ? null : photoQuestion, icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('Tanyakan dari foto soal')),
     if (answer.isNotEmpty) ...[const SizedBox(height: 20), section('Jawaban StudyGo AI', 'Baca dan pahami langkahnya'), const SizedBox(height: 9), Card(child: Padding(padding: const EdgeInsets.all(18), child: SelectableText(answer, style: const TextStyle(height: 1.65, fontSize: 15))))],
   ]);
-  Widget planner() => RefreshIndicator(onRefresh: () async { tasks = widget.api.isGuest ? await widget.api.localTasks() : await widget.api.tasks(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
+  Widget planner() => RefreshIndicator(onRefresh: () async { tasks = await widget.api.tasks(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
     pageTitle('Planner belajar', 'Atur tugas agar belajar terasa lebih ringan.'),
     Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('Tambah tugas', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 11),
