@@ -70,8 +70,11 @@ class StudyGoApi {
     Future<http.Response> send() async {
       final headers = <String, String>{'Accept': 'application/json', 'X-Device-Label': 'StudyGo Flutter'};
       if (body != null) headers['Content-Type'] = 'application/json';
-      if (auth && _accessToken != null) headers['Authorization'] = 'Bearer $_accessToken';
-      else if (auth && _guestToken != null) headers['Authorization'] = 'Bearer $_guestToken';
+      if (auth && _accessToken != null) {
+        headers['Authorization'] = 'Bearer $_accessToken';
+      } else if (auth && _guestToken != null) {
+        headers['Authorization'] = 'Bearer $_guestToken';
+      }
       final uri = Uri.parse('$baseUrl$path');
       switch (method) {
         case 'POST': return http.post(uri, headers: headers, body: jsonEncode(body ?? {}));
