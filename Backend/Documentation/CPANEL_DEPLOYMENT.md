@@ -78,7 +78,7 @@ The repository now includes a one-time wizard at `Backend/installer/index.php`.
 
 Use a brand-new, empty database dedicated to StudyGo. The wizard tracks completed files in `studygo_installer_migrations`. If an import fails, stop and inspect the database and PHP error log; do not delete the migration tracker or blindly retry. The installer is a temporary privileged tool and must not remain web-accessible.
 
-If you prefer phpMyAdmin, the dependency order is: `001_world_map.sql`, `000_studygo_auth.sql`, `schema.sql`, then migrations `002` through `009` in numeric order. Migrations 005, 007 and 009 contain ALTER TABLE statements and are not safe to execute twice.
+If you prefer phpMyAdmin, the dependency order is: `001_world_map.sql`, `000_studygo_auth.sql`, `schema.sql`, then migrations `002` through `010` in numeric order. Migration `010_guest_first.sql` creates guest sessions, guest planner tasks, and server-side guest AI quota. Migrations 005, 007, 009 and 010 contain schema changes and should only be applied once; use the installer migration tracker or a fresh empty database.
 
 ## 6. Configure secrets and services
 
