@@ -20,10 +20,27 @@ class StudyGoApi {
   String? _accessToken;
   String? _refreshToken;
   Map<String, dynamic>? user;
+  bool isGuest = false;
+
+  Future<void> startGuest() async {
+    isGuest = true;
+    await _storage.write(key: 'studygo_guest_mode', value: '1');
+  }
+
+  Future<List<dynamic>> localTasks() async {
+    final raw = await _storage.read(key: 'studygo_guest_tasks');
+    if (raw == null || raw.isEmpty) return <dynamic>[];
+    try { return (jsonDecode(raw) as List).cast<dynamic>(); } catch (_) { return <dynamic>[]; }
+  }
+
+  Future<void> saveLocalTasks(List<dynamic> tasks) async {
+    await _storage.write(key: 'studygo_guest_tasks', value: jsonEncode(tasks));
+  }
 
   Future<void> restore() async {
     _accessToken = await _storage.read(key: 'access_token');
     _refreshToken = await _storage.read(key: 'refresh_token');
+    isGuest = await _storage.read(key: 'studygo_guest_mode') == '1' && _accessToken == null;
   }
 
   Future<void> resume() async {
@@ -74,6 +91,8 @@ class StudyGoApi {
     final result = await _request('POST', '/api/v1/auth/login',
         auth: false, body: {'email': email, 'password': password});
     await _saveTokens(result);
+    isGuest = false;
+    await _storage.delete(key: 'studygo_guest_mode');
     user = (result['user'] as Map?)?.cast<String, dynamic>();
   }
 
@@ -103,6 +122,8 @@ class StudyGoApi {
     final result = await _request('POST', '/api/v1/auth/refresh', auth: false,
         retry: false, body: {'refreshToken': _refreshToken});
     await _saveTokens(result);
+    isGuest = false;
+    await _storage.delete(key: 'studygo_guest_mode');
     user = (result['user'] as Map?)?.cast<String, dynamic>();
   }
 
@@ -118,7 +139,8 @@ class StudyGoApi {
     try {
       await _request('POST', '/api/v1/auth/logout', body: {'refreshToken': _refreshToken});
     } finally {
-      _accessToken = null; _refreshToken = null; user = null;
+      _accessToken = null; _refreshToken = null; user = null; isGuest = false;
+      await _storage.delete(key: 'studygo_guest_mode');
       await _storage.delete(key: 'access_token'); await _storage.delete(key: 'refresh_token');
     }
   }
