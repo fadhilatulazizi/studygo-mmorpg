@@ -73,6 +73,7 @@ class AppRoot extends StatefulWidget {
 class _AppRootState extends State<AppRoot> {
   late final StudyGoApi api = StudyGoApi(baseUrl: apiBaseUrl);
   bool loading = true;
+  bool forceLogin = false;
   @override void initState() { super.initState(); restore(); }
   Future<void> restore() async {
     await api.restore();
@@ -81,9 +82,9 @@ class _AppRootState extends State<AppRoot> {
   }
   @override Widget build(BuildContext context) {
     if (loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    return api.user == null
-      ? LoginPage(api: api, onLogin: () => setState(() {}), isDark: widget.isDark, toggleTheme: widget.toggleTheme)
-      : StudyHome(api: api, onLogout: () => setState(() {}), isDark: widget.isDark, toggleTheme: widget.toggleTheme);
+    if (api.user != null) return StudyHome(api: api, onLogout: () => setState(() {}), onAccount: () => setState(() => forceLogin = true), isDark: widget.isDark, toggleTheme: widget.toggleTheme);
+    if (api.isGuest && !forceLogin) return StudyHome(api: api, onLogout: () => setState(() {}), onAccount: () => setState(() => forceLogin = true), isDark: widget.isDark, toggleTheme: widget.toggleTheme);
+    return LoginPage(api: api, onLogin: () => setState(() => forceLogin = false), isDark: widget.isDark, toggleTheme: widget.toggleTheme);
   }
 }
 
@@ -140,6 +141,8 @@ class _LoginPageState extends State<LoginPage> {
             try { await widget.api.forgotPassword(email.text.trim()); if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Jika akun terdaftar, tautan reset password akan dikirim.'))); }
             catch (e) { if (mounted) setState(() => error = e.toString()); }
           }, child: const Text('Lupa password?')),
+          const SizedBox(height: 6),
+          OutlinedButton.icon(onPressed: busy ? null : () async { await widget.api.startGuest(); widget.onLogin(); }, icon: const Icon(Icons.explore_outlined), label: const Text('Coba tanpa akun')),
         ]))),
         const SizedBox(height: 20),
         Text('STUDYGO  •  BELAJAR DENGAN LEBIH BAIK', textAlign: TextAlign.center, style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1, color: theme.colorScheme.onSurfaceVariant)),
@@ -149,8 +152,8 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class StudyHome extends StatefulWidget {
-  const StudyHome({super.key, required this.api, required this.onLogout, required this.isDark, required this.toggleTheme});
-  final StudyGoApi api; final VoidCallback onLogout; final bool isDark; final VoidCallback toggleTheme;
+  const StudyHome({super.key, required this.api, required this.onLogout, required this.onAccount, required this.isDark, required this.toggleTheme});
+  final StudyGoApi api; final VoidCallback onLogout; final VoidCallback onAccount; final bool isDark; final VoidCallback toggleTheme;
   @override State<StudyHome> createState() => _StudyHomeState();
 }
 class _StudyHomeState extends State<StudyHome> {
@@ -162,6 +165,11 @@ class _StudyHomeState extends State<StudyHome> {
   @override void initState() { super.initState(); loadData(); }
   @override void dispose() { question.dispose(); taskInput.dispose(); super.dispose(); }
   Future<void> loadData() async {
+    if (widget.api.isGuest) {
+      final local = await widget.api.localTasks();
+      if (mounted) setState(() { tasks = local; loading = false; });
+      return;
+    }
     try {
       final r = await Future.wait([widget.api.quota(), widget.api.tasks(), widget.api.materials(), widget.api.notifications()]);
       if (!mounted) return;
@@ -176,9 +184,11 @@ class _StudyHomeState extends State<StudyHome> {
   }
   Future<void> ask() async {
     if (question.text.trim().isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tuliskan pertanyaan terlebih dahulu.'))); return; }
+    if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tutor AI memerlukan akun. Masuk atau daftar untuk menggunakan AI.'))); widget.onAccount(); return; }
     await run(() async { final value = await widget.api.ask(question.text.trim()); if (mounted) setState(() => answer = value); });
   }
   Future<void> photoQuestion() async {
+    if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Analisis foto memerlukan akun. Masuk atau daftar terlebih dahulu.'))); widget.onAccount(); return; }
     await run(() async {
       final image = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 82, maxWidth: 1800);
       if (image == null) return;
@@ -188,9 +198,16 @@ class _StudyHomeState extends State<StudyHome> {
   }
   Future<void> addTask() async {
     if (taskInput.text.trim().isEmpty) return;
-    await run(() async { await widget.api.createTask(taskInput.text.trim()); taskInput.clear(); tasks = await widget.api.tasks(); if (mounted) setState(() {}); });
+    await run(() async {
+      if (widget.api.isGuest) {
+        tasks = [...tasks, {'id': DateTime.now().microsecondsSinceEpoch, 'title': taskInput.text.trim(), 'status': 'todo'}];
+        await widget.api.saveLocalTasks(tasks);
+      } else { await widget.api.createTask(taskInput.text.trim()); tasks = await widget.api.tasks(); }
+      taskInput.clear(); if (mounted) setState(() {});
+    });
   }
   Future<void> upload() async {
+    if (widget.api.isGuest) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Penyimpanan materi cloud memerlukan akun.'))); widget.onAccount(); return; }
     await run(() async {
       final result = await FilePicker.platform.pickFiles(withData: true, type: FileType.custom, allowedExtensions: ['pdf','docx','pptx','mp4','webm','jpg','jpeg','png','webp']);
       if (result == null) return;
@@ -205,7 +222,7 @@ class _StudyHomeState extends State<StudyHome> {
     return Scaffold(
       appBar: AppBar(
         title: Row(children: [Container(width: 35, height: 35, decoration: BoxDecoration(color: teal.withValues(alpha: .12), borderRadius: BorderRadius.circular(11)), child: const Icon(Icons.school_rounded, color: teal, size: 21)), const SizedBox(width: 10), const Text('StudyGo', style: TextStyle(fontWeight: FontWeight.w800))]),
-        actions: [IconButton(tooltip: 'Ganti tema', onPressed: widget.toggleTheme, icon: Icon(widget.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined)), IconButton(tooltip: 'Keluar', onPressed: busy ? null : logout, icon: const Icon(Icons.logout_rounded)), const SizedBox(width: 5)],
+        actions: [if (widget.api.isGuest) IconButton(tooltip: 'Masuk atau daftar', onPressed: widget.onAccount, icon: const Icon(Icons.account_circle_outlined)), IconButton(tooltip: 'Ganti tema', onPressed: widget.toggleTheme, icon: Icon(widget.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined)), IconButton(tooltip: 'Keluar', onPressed: busy ? null : logout, icon: const Icon(Icons.logout_rounded)), const SizedBox(width: 5)],
       ),
       body: Stack(children: [IndexedStack(index: tab, children: pages), if (busy) Positioned.fill(child: ColoredBox(color: Colors.black.withValues(alpha: .07), child: const Center(child: CircularProgressIndicator())))]),
       bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() => tab = v), destinations: const [
@@ -235,7 +252,7 @@ class _StudyHomeState extends State<StudyHome> {
       Container(padding: const EdgeInsets.all(21), decoration: BoxDecoration(borderRadius: BorderRadius.circular(23), gradient: const LinearGradient(colors: [Color(0xFF087F76), Color(0xFF13A58F)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: [BoxShadow(color: teal.withValues(alpha: .18), blurRadius: 20, offset: const Offset(0,8))]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [const Expanded(child: Text('Ruang belajarmu', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600))), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: Colors.white.withValues(alpha: .16), borderRadius: BorderRadius.circular(20)), child: const Text('STUDYGO AI', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)))]),
         const SizedBox(height: 13), const Text('Belajar sedikit demi sedikit, hasilkan kemajuan besar.', style: TextStyle(color: Colors.white, fontSize: 21, height: 1.25, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 16), Row(children: [const Icon(Icons.auto_awesome, color: Colors.white, size: 18), const SizedBox(width: 8), Text(loading ? 'Memuat kuota AI…' : 'Sisa pertanyaan hari ini: ${quota?['questionsRemaining'] ?? '—'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))]),
+        const SizedBox(height: 16), Row(children: [const Icon(Icons.auto_awesome, color: Colors.white, size: 18), const SizedBox(width: 8), Text(widget.api.isGuest ? 'Mode tamu • tugas tersimpan di perangkat' : (loading ? 'Memuat kuota AI…' : 'Sisa pertanyaan hari ini: ${quota?['questionsRemaining'] ?? '—'}'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))]),
         const SizedBox(height: 17), SizedBox(width: double.infinity, child: FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF087F76)), onPressed: () => setState(() => tab = 1), child: const Text('Mulai belajar'))),
       ])),
       const SizedBox(height: 23), section('Mulai belajar', 'Pilih aktivitasmu'), const SizedBox(height: 11),
@@ -253,13 +270,13 @@ class _StudyHomeState extends State<StudyHome> {
   Widget stat(IconData icon, int value, String label) => Card(child: Padding(padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6), child: Column(children: [Icon(icon, color: teal, size: 19), const SizedBox(height: 7), Text('$value', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19)), Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant))])));
   Widget tutor() => ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 28), children: [
     pageTitle('Tutor AI', 'Tanyakan materi atau kirim foto soal.'),
-    Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: teal.withValues(alpha: .12), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.auto_awesome, color: teal)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('StudyGo AI siap membantu', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 4), Text('Sisa pertanyaan: ${quota?['questionsRemaining'] ?? '—'}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12))]))]))),
+    Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: teal.withValues(alpha: .12), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.auto_awesome, color: teal)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('StudyGo AI siap membantu', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 4), Text(widget.api.isGuest ? 'Masuk untuk membuka fitur AI' : 'Sisa pertanyaan: ${quota?['questionsRemaining'] ?? '—'}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12))]))]))),
     const SizedBox(height: 14), TextField(controller: question, minLines: 4, maxLines: 7, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(hintText: 'Contoh: Jelaskan hukum Newton dengan contoh sederhana…', alignLabelWithHint: true)),
     const SizedBox(height: 11), FilledButton.icon(onPressed: busy ? null : ask, icon: const Icon(Icons.send_rounded), label: const Text('Kirim pertanyaan')),
     const SizedBox(height: 9), OutlinedButton.icon(onPressed: busy ? null : photoQuestion, icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('Tanyakan dari foto soal')),
     if (answer.isNotEmpty) ...[const SizedBox(height: 20), section('Jawaban StudyGo AI', 'Baca dan pahami langkahnya'), const SizedBox(height: 9), Card(child: Padding(padding: const EdgeInsets.all(18), child: SelectableText(answer, style: const TextStyle(height: 1.65, fontSize: 15))))],
   ]);
-  Widget planner() => RefreshIndicator(onRefresh: () async { tasks = await widget.api.tasks(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
+  Widget planner() => RefreshIndicator(onRefresh: () async { tasks = widget.api.isGuest ? await widget.api.localTasks() : await widget.api.tasks(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
     pageTitle('Planner belajar', 'Atur tugas agar belajar terasa lebih ringan.'),
     Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('Tambah tugas', style: TextStyle(fontWeight: FontWeight.w800)), const SizedBox(height: 11),
@@ -271,7 +288,7 @@ class _StudyHomeState extends State<StudyHome> {
     if (tasks.isEmpty) empty(Icons.event_note_outlined, 'Belum ada tugas', 'Tambahkan tugas pertamamu di atas.') else ...tasks.map(taskTile),
   ]));
   Widget taskTile(dynamic item) => Card(child: ListTile(contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 4), leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: teal.withValues(alpha: .10), borderRadius: BorderRadius.circular(13)), child: const Icon(Icons.task_alt, color: teal)), title: Text(item['title']?.toString() ?? 'Tugas', style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text(item['status']?.toString() ?? 'Belum ada status')));
-  Widget library() => RefreshIndicator(onRefresh: () async { materials = await widget.api.materials(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
+  Widget library() => RefreshIndicator(onRefresh: () async { if (!widget.api.isGuest) materials = await widget.api.materials(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
     pageTitle('Materi belajar', 'Simpan bahan belajar dalam satu tempat.'),
     Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(children: [
       Container(width: 58, height: 58, decoration: BoxDecoration(color: teal.withValues(alpha: .11), borderRadius: BorderRadius.circular(18)), child: const Icon(Icons.cloud_upload_outlined, color: teal, size: 30)),
@@ -282,7 +299,7 @@ class _StudyHomeState extends State<StudyHome> {
     const SizedBox(height: 21), section('Koleksi materi', '${materials.length} file tersimpan'), const SizedBox(height: 9),
     if (materials.isEmpty) empty(Icons.folder_open_outlined, 'Belum ada materi', 'File yang kamu unggah akan muncul di sini.') else ...materials.map((m) => Card(child: ListTile(leading: const Icon(Icons.insert_drive_file_outlined, color: Color(0xFFE49A42)), title: Text(m['title']?.toString() ?? m['original_name']?.toString() ?? 'Materi'), subtitle: Text('${m['material_type'] ?? 'File'} • ${m['original_name'] ?? ''}')))),
   ]));
-  Widget inbox() => RefreshIndicator(onRefresh: () async { notifications = await widget.api.notifications(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
+  Widget inbox() => RefreshIndicator(onRefresh: () async { if (!widget.api.isGuest) notifications = await widget.api.notifications(); if (mounted) setState(() {}); }, child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20,14,20,28), children: [
     pageTitle('Notifikasi', 'Informasi dan pengingat belajarmu.'),
     if (notifications.isEmpty) empty(Icons.notifications_none, 'Belum ada notifikasi', 'Notifikasi baru akan muncul di sini.') else ...notifications.map((n) => Card(child: ListTile(leading: const Icon(Icons.notifications_active_outlined, color: Color(0xFFCC718B)), title: Text(n['title']?.toString() ?? 'Notifikasi', style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text(n['body']?.toString() ?? ''), onTap: busy ? null : () => run(() async { await widget.api.markNotificationRead(int.parse(n['id'].toString())); notifications = await widget.api.notifications(); if (mounted) setState(() {}); })))),
   ]));
