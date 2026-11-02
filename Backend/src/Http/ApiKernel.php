@@ -110,6 +110,7 @@ final class ApiKernel
             $this->pdo->prepare("INSERT INTO game_players(studygo_user_id,display_name) VALUES(?,?)")->execute([$id,$name]);
             $this->pdo->commit();
         }catch(\Throwable $e){if($this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
+        $this->claimGuestSession($id,$b['guestToken']??null);
         $mailSent=$this->sendAccountToken($id,$email,'verify_email');
         $this->respond(201,['user'=>['id'=>$id,'email'=>$email,'displayName'=>$name],'message'=>$mailSent?'verification_email_sent':'account_created_email_delivery_not_configured']);
     }
@@ -146,7 +147,25 @@ final class ApiKernel
         if(password_needs_rehash($user['password_hash'],PASSWORD_DEFAULT))
             $this->pdo->prepare("UPDATE studygo_users SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$user['id']]);
         $this->pdo->prepare("UPDATE studygo_users SET last_login_at=UTC_TIMESTAMP() WHERE id=?")->execute([$user['id']]);
+        $this->claimGuestSession((int)$user['id'],$b['guestToken']??null);
         $this->issueSession((int)$user['id'],['id'=>(int)$user['id'],'email'=>$user['email'],'displayName'=>$user['display_name']]);
+    }
+
+    private function claimGuestSession(int $userId,mixed $rawToken): void
+    {
+        $token=(string)$rawToken;
+        if($token===''||!preg_match('/^[A-Za-z0-9_-]{60,100}$/',$token)) return;
+        $this->pdo->beginTransaction();
+        try {
+            $q=$this->pdo->prepare("SELECT id FROM studygo_guest_sessions WHERE token_hash=? AND claimed_by IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE");
+            $q->execute([hash('sha256',$token)]); $guest=$q->fetch();
+            if($guest){
+                $gid=(int)$guest['id'];
+                $this->pdo->prepare("INSERT INTO study_tasks(user_id,title,priority,status) SELECT ?,title,priority,status FROM study_guest_tasks WHERE guest_id=?")->execute([$userId,$gid]);
+                $this->pdo->prepare("UPDATE studygo_guest_sessions SET claimed_by=? WHERE id=?")->execute([$userId,$gid]);
+            }
+            $this->pdo->commit();
+        } catch(\Throwable $e) { if($this->pdo->inTransaction())$this->pdo->rollBack(); throw $e; }
     }
 
     private function issueSession(int $userId,array $user,?string $existingSessionId=null): void
