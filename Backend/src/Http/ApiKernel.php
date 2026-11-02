@@ -35,6 +35,11 @@ final class ApiKernel
                 $this->respond(200, ['status'=>'ok','service'=>'studygo-api']);
                 return;
             }
+            if ($method === 'POST' && $path === '/api/v1/guest/session') { $this->startGuestSession(); return; }
+            if ($method === 'GET' && $path === '/api/v1/guest/me') {
+                $g=$this->authenticatedGuest();
+                $this->respond(200,['guest'=>true,'expiresAt'=>$g['expires_at']]); return;
+            }
             if ($method === 'POST' && $path === '/api/v1/auth/register') { $this->register($body); return; }
             if ($method === 'POST' && $path === '/api/v1/auth/login') { $this->login($body); return; }
             if ($method === 'POST' && $path === '/api/v1/auth/refresh') { $this->refresh($body); return; }
@@ -56,6 +61,14 @@ final class ApiKernel
                 $education=new EducationApi($this->pdo,$this->config);
                 $result=$education->rewardCallback($body,(string)($_SERVER['HTTP_X_STUDYGO_SIGNATURE']??''));
                 $this->respond(200,$result); return;
+            }
+
+            if (str_starts_with($path,'/api/v1/guest/')) {
+                $guest=$this->authenticatedGuest();
+                $education=new EducationApi($this->pdo,$this->config);
+                $result=$education->handleGuest($method,$path,$body,(int)$guest['id']);
+                if($result!==null){$this->respond($result['status'],$result['data']);return;}
+                $this->respond(404,['error'=>'not_found']); return;
             }
 
             $user=$this->authenticatedUser();
@@ -178,6 +191,26 @@ final class ApiKernel
         if($access!=='')$this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE token_hash=? AND token_type='access' AND revoked_at IS NULL")->execute([hash('sha256',$access)]);
         if(preg_match('/^[A-Za-z0-9_-]{60,100}$/',$refresh))$this->pdo->prepare("UPDATE studygo_refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE token_hash=? AND token_type='refresh' AND revoked_at IS NULL")->execute([hash('sha256',$refresh)]);
         $this->respond(200,['loggedOut'=>true]);
+    }
+
+    private function startGuestSession(): void
+    {
+        $token=$this->randomToken(48);
+        $days=7;
+        $this->pdo->prepare("INSERT INTO studygo_guest_sessions(token_hash,expires_at) VALUES(?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY))")
+            ->execute([hash('sha256',$token),$days]);
+        $this->respond(201,['guestToken'=>$token,'tokenType'=>'Bearer','expiresIn'=>$days*86400,'dailyAiLimit'=>5]);
+    }
+
+    private function authenticatedGuest(): array
+    {
+        $header=$_SERVER['HTTP_AUTHORIZATION']??'';
+        if(!preg_match('/^Bearer\\s+([A-Za-z0-9_-]{60,100})$/i',$header,$m)){$this->respond(401,['error'=>'guest_unauthorized']);exit;}
+        $q=$this->pdo->prepare("SELECT id,expires_at FROM studygo_guest_sessions WHERE token_hash=? AND claimed_by IS NULL AND expires_at>UTC_TIMESTAMP() LIMIT 1");
+        $q->execute([hash('sha256',$m[1])]);$g=$q->fetch();
+        if(!$g){$this->respond(401,['error'=>'guest_session_expired']);exit;}
+        $this->pdo->prepare("UPDATE studygo_guest_sessions SET last_seen_at=UTC_TIMESTAMP() WHERE id=?")->execute([$g['id']]);
+        return $g;
     }
 
     private function authenticatedUser(): array
