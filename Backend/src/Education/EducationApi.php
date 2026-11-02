@@ -42,6 +42,7 @@ final class EducationApi
         if($method==='POST' && $path==='/api/v1/guest/planner/tasks') return ['status'=>201,'data'=>['task'=>$this->createGuestTask($guestId,$body)]];
         if($method==='GET' && $path==='/api/v1/guest/ai/quota') return ['status'=>200,'data'=>$this->guestQuota($guestId)];
         if($method==='POST' && $path==='/api/v1/guest/ai/tutor') return ['status'=>200,'data'=>['answer'=>$this->guestAskTutor($guestId,$body)]];
+        if($method==='POST' && $path==='/api/v1/guest/ai/solve-image') return ['status'=>200,'data'=>['answer'=>$this->guestSolveImage($guestId,$body)]];
         return null;
     }
 
@@ -67,6 +68,32 @@ final class EducationApi
         $q=$this->pdo->prepare("SELECT questions_used FROM study_guest_ai_usage WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))");
         $q->execute([$guestId]); $used=(int)($q->fetchColumn()?:0);
         return ['date'=>(new \\DateTimeImmutable('now',new \\DateTimeZone('Asia/Jakarta')))->format('Y-m-d'),'timezone'=>'Asia/Jakarta','freeLimit'=>5,'questionsUsed'=>$used,'questionsRemaining'=>max(0,5-$used),'dailyMaximum'=>5,'guest'=>true];
+    }
+
+    private function guestSolveImage(int $guestId,array $b): string
+    {
+        $mime=(string)($b['mimeType']??''); $data=(string)($b['imageBase64']??'');
+        if(!in_array($mime,['image/jpeg','image/png','image/webp'],true)||$data===''||strlen($data)>11000000) throw new \\InvalidArgumentException('invalid_image_payload');
+        $binary=base64_decode($data,true);
+        if($binary===false||strlen($binary)>8000000) throw new \\InvalidArgumentException('image_too_large_or_invalid');
+        $finfo=new \\finfo(FILEINFO_MIME_TYPE);
+        if($finfo->buffer($binary)!==$mime) throw new \\InvalidArgumentException('image_mime_mismatch');
+        $prompt=trim((string)($b['question']??'Baca dan selesaikan soal pada gambar. Jelaskan langkahnya.'));
+        if($prompt===''||mb_strlen($prompt)>3000) throw new \\InvalidArgumentException('invalid_question');
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare("INSERT IGNORE INTO study_guest_ai_usage(guest_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)))")->execute([$guestId]);
+            $q=$this->pdo->prepare("SELECT questions_used FROM study_guest_ai_usage WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");
+            $q->execute([$guestId]); $used=(int)$q->fetchColumn();
+            if($used>=5) throw new \\DomainException('daily_ai_quota_exceeded');
+            $this->pdo->prepare("UPDATE study_guest_ai_usage SET questions_used=questions_used+1 WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$guestId]);
+            $this->pdo->commit();
+        } catch(\\Throwable $e) { if($this->pdo->inTransaction())$this->pdo->rollBack(); throw $e; }
+        try { return $this->callImageProvider($prompt,$mime,$data); }
+        catch(\\Throwable $e) {
+            $this->pdo->prepare("UPDATE study_guest_ai_usage SET questions_used=GREATEST(questions_used-1,0) WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$guestId]);
+            throw $e;
+        }
     }
 
     private function guestAskTutor(int $guestId,array $b): string
