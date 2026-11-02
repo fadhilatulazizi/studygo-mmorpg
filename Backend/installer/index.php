@@ -81,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $migrationDir . '/migrations/007_auth_security.sql',
                     $migrationDir . '/migrations/008_admob_admin.sql',
                     $migrationDir . '/migrations/009_education_platform.sql',
+                    $migrationDir . '/migrations/010_guest_first.sql',
                 ];
                 try {
                     $db->query("CREATE TABLE IF NOT EXISTS studygo_installer_migrations (migration VARCHAR(190) NOT NULL PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
