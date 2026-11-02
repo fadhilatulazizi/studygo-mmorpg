@@ -36,6 +36,59 @@ final class EducationApi
         return null;
     }
 
+    public function handleGuest(string $method,string $path,array $body,int $guestId): ?array
+    {
+        if($method==='GET' && $path==='/api/v1/guest/planner/tasks') return ['status'=>200,'data'=>['tasks'=>$this->guestTasks($guestId)]];
+        if($method==='POST' && $path==='/api/v1/guest/planner/tasks') return ['status'=>201,'data'=>['task'=>$this->createGuestTask($guestId,$body)]];
+        if($method==='GET' && $path==='/api/v1/guest/ai/quota') return ['status'=>200,'data'=>$this->guestQuota($guestId)];
+        if($method==='POST' && $path==='/api/v1/guest/ai/tutor') return ['status'=>200,'data'=>['answer'=>$this->guestAskTutor($guestId,$body)]];
+        return null;
+    }
+
+    private function guestTasks(int $guestId): array
+    {
+        $q=$this->pdo->prepare("SELECT id,title,priority,status,created_at,updated_at FROM study_guest_tasks WHERE guest_id=? ORDER BY created_at DESC LIMIT 200");
+        $q->execute([$guestId]); return $q->fetchAll();
+    }
+
+    private function createGuestTask(int $guestId,array $b): array
+    {
+        $title=trim((string)($b['title']??''));
+        if($title===''||mb_strlen($title)>180) throw new \\InvalidArgumentException('invalid_title');
+        $priority=$this->enum($b['priority']??'normal',['low','normal','high']);
+        $status=$this->enum($b['status']??'todo',['todo','in_progress','done','cancelled']);
+        $q=$this->pdo->prepare("INSERT INTO study_guest_tasks(guest_id,title,priority,status) VALUES(?,?,?,?)");
+        $q->execute([$guestId,$title,$priority,$status]);
+        return ['id'=>(int)$this->pdo->lastInsertId(),'title'=>$title,'priority'=>$priority,'status'=>$status];
+    }
+
+    private function guestQuota(int $guestId): array
+    {
+        $q=$this->pdo->prepare("SELECT questions_used FROM study_guest_ai_usage WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))");
+        $q->execute([$guestId]); $used=(int)($q->fetchColumn()?:0);
+        return ['date'=>(new \\DateTimeImmutable('now',new \\DateTimeZone('Asia/Jakarta')))->format('Y-m-d'),'timezone'=>'Asia/Jakarta','freeLimit'=>5,'questionsUsed'=>$used,'questionsRemaining'=>max(0,5-$used),'dailyMaximum'=>5,'guest'=>true];
+    }
+
+    private function guestAskTutor(int $guestId,array $b): string
+    {
+        $prompt=trim((string)($b['question']??''));
+        if($prompt===''||mb_strlen($prompt)>12000) throw new \\InvalidArgumentException('invalid_question');
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare("INSERT IGNORE INTO study_guest_ai_usage(guest_id,usage_date) VALUES(?,DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)))")->execute([$guestId]);
+            $q=$this->pdo->prepare("SELECT questions_used FROM study_guest_ai_usage WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) FOR UPDATE");
+            $q->execute([$guestId]); $used=(int)$q->fetchColumn();
+            if($used>=5) throw new \\DomainException('daily_ai_quota_exceeded');
+            $this->pdo->prepare("UPDATE study_guest_ai_usage SET questions_used=questions_used+1 WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$guestId]);
+            $this->pdo->commit();
+        } catch(\\Throwable $e) { if($this->pdo->inTransaction())$this->pdo->rollBack(); throw $e; }
+        try { return $this->callProvider($prompt); }
+        catch(\\Throwable $e) {
+            $this->pdo->prepare("UPDATE study_guest_ai_usage SET questions_used=GREATEST(questions_used-1,0) WHERE guest_id=? AND usage_date=DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))")->execute([$guestId]);
+            throw $e;
+        }
+    }
+
     public function rewardCallback(array $b, string $signature): array
     {
         $secret=(string)($this->config['ads']['callback_secret']??'');
